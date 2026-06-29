@@ -98,12 +98,21 @@ final class MTEBCorrelationMathTests: XCTestCase {
     }
 
     func testSpearmanTiedValuesAverageRank() {
-        // x has ties at positions 1 and 2 (both 2.0); their average rank is 1.5.
-        // y is perfectly monotone → Spearman should still be 1.0 since the
-        // y-ranks match the x-ranks despite ties.
+        // x has ties at sorted positions 2 and 3 (both 2.0); their average rank is 2.5.
+        // y is perfectly monotone with the same tie structure → Spearman is 1.0.
         let x = [1.0, 2.0, 2.0, 3.0]
         let y = [10.0, 20.0, 20.0, 30.0]
         XCTAssertEqual(CorrelationMath.spearman(x, y), 1.0, accuracy: 1e-10)
+    }
+
+    func testSpearmanTiesDetectWrongRanking() {
+        // Asymmetric: x has a tie, y does not, so a WRONG tie strategy (min/max/
+        // dense rank) yields a different Spearman than correct average-rank — i.e.
+        // this case actually guards the tie logic (the symmetric test above cannot).
+        // Correct avg-rank: ranks(x)=[1,2.5,2.5,4], ranks(y)=[1,2,3,4] → r≈0.94868.
+        let x = [1.0, 2.0, 2.0, 4.0]
+        let y = [0.1, 0.3, 0.8, 0.9]
+        XCTAssertEqual(CorrelationMath.spearman(x, y), 0.94868, accuracy: 1e-4)
     }
 
     // MARK: - ranks helper

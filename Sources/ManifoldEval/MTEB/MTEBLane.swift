@@ -133,7 +133,12 @@ public enum MTEBLane {
     ///
     /// The embedder's ``EmbeddingBackend/embed(_:)`` is called with 2-element batches
     /// (one per pair). Callers that want to amortise batch cost over many pairs may
-    /// subclass or pre-warm the embedder before calling this method.
+    /// wrap or replace the embedder with one that pre-batches inputs.
+    ///
+    /// > Note: this lane is currently a library + test-driven surface — it is
+    /// > exercised by `MTEBLaneOllamaLiveTests` (gated on `RUN_OLLAMA_EMBED=1`), not
+    /// > yet by a `manifold-eval` CLI subcommand. A `manifold-eval mteb` runner is a
+    /// > fast follow-up; the lane logic and correlation math are complete and tested.
     ///
     /// - Parameters:
     ///   - pairs: Sentence pairs to evaluate. Must not be empty.

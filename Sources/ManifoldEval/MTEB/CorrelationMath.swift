@@ -19,7 +19,10 @@ public enum CorrelationMath {
         let normA = a.reduce(Float(0)) { $0 + $1 * $1 }.squareRoot()
         let normB = b.reduce(Float(0)) { $0 + $1 * $1 }.squareRoot()
         guard normA > 0, normB > 0 else { return .nan }
-        return Double(dotAB / (normA * normB))
+        // Final division in Double + clamp: Float (~7 digits) can push the ratio a
+        // hair outside [-1, 1] on near-parallel vectors; cosine is defined on [-1, 1].
+        let cos = Double(dotAB) / (Double(normA) * Double(normB))
+        return min(1.0, max(-1.0, cos))
     }
 
     // MARK: - Pearson correlation
