@@ -16,7 +16,9 @@ func relationHolds(_ count: Int, _ relation: String, _ target: Int) -> Bool {
     case "less than": return count < target
     case "more than": return count > target
     case "around":
-        let tolerance = max(5, Int((Double(target) * 0.1).rounded()))
+        // Use Int() (floor toward zero), matching Python int() semantics —
+        // not Swift's .rounded() which rounds to nearest.
+        let tolerance = max(5, Int(Double(target) * 0.1))
         return abs(count - target) <= tolerance
     default: return false
     }
@@ -26,8 +28,9 @@ func relationHolds(_ count: Int, _ relation: String, _ target: Int) -> Bool {
 
 /// Verifies `length_constraints:number_words`.
 ///
-/// Counts whitespace-separated tokens. `relation` must be one of the standard
-/// IFEval relation strings (e.g. `"at least"`, `"around"`).
+/// Counts tokens separated by any whitespace (spaces, newlines, tabs), matching
+/// Python `str.split()` which splits on all whitespace. `relation` must be one
+/// of the standard IFEval relation strings (e.g. `"at least"`, `"around"`).
 public struct WordCountVerifier: IFEvalVerifier {
     public let instructionID = "length_constraints:number_words"
 
@@ -38,7 +41,10 @@ public struct WordCountVerifier: IFEvalVerifier {
             let relation = kwargs["relation"]?.stringValue,
             let target = kwargs["num_words"]?.intValue
         else { return false }
-        let count = response.split(separator: " ").count
+        // Split on all whitespace (spaces, newlines, tabs) to match Python
+        // str.split() — omitEmptySubsequences is true by default, so leading /
+        // trailing / consecutive whitespace does not produce empty tokens.
+        let count = response.split(whereSeparator: \.isWhitespace).count
         return relationHolds(count, relation, target)
     }
 }
@@ -48,11 +54,25 @@ public struct WordCountVerifier: IFEvalVerifier {
 /// Verifies `length_constraints:number_sentences`.
 ///
 /// Splits on sentence-terminal punctuation (`.`, `?`, `!`) followed by
-/// whitespace or end of string, then counts non-empty segments.
+/// whitespace and an uppercase letter, or by optional whitespace at end of
+/// string. This avoids false splits inside abbreviations (e.g. "U.S.A.") and
+/// decimal numbers (e.g. "3.5"), matching the IFEval reference intent.
 public struct SentenceCountVerifier: IFEvalVerifier {
     public let instructionID = "length_constraints:number_sentences"
 
     public init() {}
+
+    /// Compiled once at load time; never recompiled per-call.
+    private static let terminalPunctRegex: NSRegularExpression = {
+        do {
+            // Matches a sentence-terminal character followed by either:
+            //   • whitespace + uppercase letter (a new sentence starts), OR
+            //   • optional whitespace + end-of-string (final sentence).
+            return try NSRegularExpression(pattern: #"[.?!](?=\s+[A-Z]|\s*$)"#)
+        } catch {
+            fatalError("invalid static regex: \(error)")
+        }
+    }()
 
     public func verify(response: String, kwargs: [String: IFEvalKwarg]) -> Bool {
         guard
@@ -64,8 +84,9 @@ public struct SentenceCountVerifier: IFEvalVerifier {
     }
 
     private func sentenceCount(_ text: String) -> Int {
-        // Split on '.', '?', '!' optionally followed by spaces/newlines.
-        let parts = text.components(separatedBy: CharacterSet(charactersIn: ".?!"))
+        // Splitting on the terminal punctuation position (not the following
+        // whitespace) keeps punctuation with each sentence segment.
+        let parts = text.components(separatedBy: SentenceCountVerifier.terminalPunctRegex)
         return parts.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
     }
 }
@@ -87,10 +108,18 @@ public struct ParagraphCountVerifier: IFEvalVerifier {
         return count == target
     }
 
+    /// Compiled once at load time; never recompiled per-call.
+    private static let paragraphSeparatorRegex: NSRegularExpression = {
+        do {
+            return try NSRegularExpression(pattern: "\n{2,}")
+        } catch {
+            fatalError("invalid static regex: \(error)")
+        }
+    }()
+
     static func paragraphs(in text: String) -> [String] {
         // Split on two or more consecutive newlines.
-        let pattern = "\n{2,}"
-        let parts = text.components(separatedBy: try? NSRegularExpression(pattern: pattern))
+        let parts = text.components(separatedBy: ParagraphCountVerifier.paragraphSeparatorRegex)
         return parts.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 

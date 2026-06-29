@@ -40,7 +40,7 @@ public struct KeywordExclusionVerifier: IFEvalVerifier {
 /// Verifies `keywords:frequency`.
 ///
 /// The keyword must appear with the given relational frequency
-/// (case-insensitive occurrences of the exact word token).
+/// (case-insensitive substring occurrence, matching Python `str.count()`).
 public struct KeywordFrequencyVerifier: IFEvalVerifier {
     public let instructionID = "keywords:frequency"
 

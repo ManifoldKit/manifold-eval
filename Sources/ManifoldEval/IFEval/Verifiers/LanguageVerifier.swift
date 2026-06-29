@@ -30,6 +30,9 @@ public struct ResponseLanguageVerifier: IFEvalVerifier {
         }
 
         // NLLanguageRecognizer path for Latin-script and other languages.
+        // NOTE: sw (Swahili), zh (Chinese), ja (Japanese) and other scripts
+        // not in the fast-path map all fall through here. sw may return nil
+        // → always false; zh/ja recognizer confidence varies by text length.
         let recognizer = NLLanguageRecognizer()
         recognizer.processString(trimmed)
         guard let dominant = recognizer.dominantLanguage else { return false }

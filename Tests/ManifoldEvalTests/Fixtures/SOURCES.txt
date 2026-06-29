@@ -1,0 +1,17 @@
+Fixture sources
+===============
+
+ifeval.jsonl
+------------
+Origin:  google-research/instruction_following_eval
+         https://github.com/google-research/instruction_following_eval
+File:    instruction_following_eval/data/input_data.jsonl
+License: Apache License 2.0
+         https://github.com/google-research/instruction_following_eval/blob/main/LICENSE
+
+This file is a verbatim copy of the IFEval input corpus (541 cases) published
+by Google Research under the Apache 2.0 license. It is reproduced here solely
+for use as a test fixture in ManifoldEval's IFEval lane unit and integration
+tests. The ManifoldEval package itself is distributed under the MIT License;
+this fixture file retains its original Apache 2.0 license. See the LICENSE
+file at the repo root for the ManifoldEval license.

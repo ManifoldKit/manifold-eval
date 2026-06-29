@@ -41,13 +41,25 @@ public struct BulletListVerifier: IFEvalVerifier {
 
 /// Verifies `detectable_format:number_highlighted_sections`.
 ///
-/// Highlighted sections are marked with markdown italics: `*text*`.
-/// Counts non-overlapping `*...*` spans. The response must contain at least
-/// `num_highlights` such spans.
+/// Highlighted sections are marked with `*text*` spans. Counts non-overlapping
+/// matches of `\*[^*\n]+\*`, which is the IFEval Python reference regex.
+///
+/// Note: this pattern **does** match the inner `*text*` span inside `**bold**`
+/// (e.g. `"**bold**"` counts as one highlighted section), matching the Python
+/// reference behaviour.
 public struct HighlightedSectionsVerifier: IFEvalVerifier {
     public let instructionID = "detectable_format:number_highlighted_sections"
 
     public init() {}
+
+    /// Compiled once at load time; matches the IFEval Python reference regex.
+    private static let highlightRegex: NSRegularExpression = {
+        do {
+            return try NSRegularExpression(pattern: #"\*[^*\n]+\*"#)
+        } catch {
+            fatalError("invalid static regex: \(error)")
+        }
+    }()
 
     public func verify(response: String, kwargs: [String: IFEvalKwarg]) -> Bool {
         guard let target = kwargs["num_highlights"]?.intValue else { return false }
@@ -56,13 +68,8 @@ public struct HighlightedSectionsVerifier: IFEvalVerifier {
     }
 
     private func highlightCount(in text: String) -> Int {
-        // Match *...* spans (non-greedy), avoiding **bold** by requiring the
-        // asterisk is not immediately followed/preceded by another asterisk.
-        guard let regex = try? NSRegularExpression(pattern: #"(?<!\*)\*(?!\*)(?:[^*]+)(?<!\*)\*(?!\*)"#) else {
-            return 0
-        }
         let range = NSRange(text.startIndex..., in: text)
-        return regex.numberOfMatches(in: text, range: range)
+        return HighlightedSectionsVerifier.highlightRegex.numberOfMatches(in: text, range: range)
     }
 }
 
@@ -102,9 +109,13 @@ public struct SectionSeparatorVerifier: IFEvalVerifier {
         else { return false }
 
         let escapedSplitter = NSRegularExpression.escapedPattern(for: splitter)
-        guard let regex = try? NSRegularExpression(
-            pattern: #"(?im)^\s*"# + escapedSplitter + #"\s+\d+"#
-        ) else { return false }
+        let regex: NSRegularExpression
+        do {
+            regex = try NSRegularExpression(pattern: #"(?im)^\s*"# + escapedSplitter + #"\s+\d+"#)
+        } catch {
+            // Pattern is built from escaped user input; failure means no match.
+            return false
+        }
 
         let range = NSRange(response.startIndex..., in: response)
         let count = regex.numberOfMatches(in: response, range: range)
@@ -123,11 +134,19 @@ public struct PlaceholderCountVerifier: IFEvalVerifier {
 
     public init() {}
 
+    /// Compiled once at load time; never recompiled per-call.
+    private static let placeholderRegex: NSRegularExpression = {
+        do {
+            return try NSRegularExpression(pattern: #"\[[^\[\]]+\]"#)
+        } catch {
+            fatalError("invalid static regex: \(error)")
+        }
+    }()
+
     public func verify(response: String, kwargs: [String: IFEvalKwarg]) -> Bool {
         guard let target = kwargs["num_placeholders"]?.intValue else { return false }
-        guard let regex = try? NSRegularExpression(pattern: #"\[[^\[\]]+\]"#) else { return false }
         let range = NSRange(response.startIndex..., in: response)
-        let count = regex.numberOfMatches(in: response, range: range)
+        let count = PlaceholderCountVerifier.placeholderRegex.numberOfMatches(in: response, range: range)
         return count >= target
     }
 }
@@ -169,6 +188,11 @@ public struct ConstrainedResponseVerifier: IFEvalVerifier {
     public init() {}
 
     public func verify(response: String, kwargs: [String: IFEvalKwarg]) -> Bool {
+        // NOTE: The IFEval Python reference always returns True for this
+        // instruction — it has no stored option list at runtime to check
+        // against. This verifier deliberately uses a single-line /
+        // no-markdown heuristic as an approximation of the expected
+        // short-phrase response shape (vacuous-true in the reference).
         let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
         // Must be a single line.
         guard !trimmed.contains("\n") else { return false }

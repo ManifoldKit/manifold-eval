@@ -5,10 +5,9 @@ import ManifoldInference
 /// Integration tests for `IFEvalLane` and `IFEvalCorpus`.
 ///
 /// The bundled `Fixtures/ifeval.jsonl` is the full 541-case IFEval corpus
-/// from `google-research/instruction_following_eval` (downloaded at build
-/// time and committed under `Tests/ManifoldEvalTests/Fixtures/`).
-/// The full-corpus test is gated behind a simple fixture presence check so
-/// it always runs — no env var needed.
+/// from `google-research/instruction_following_eval`, committed alongside
+/// these tests. The full-corpus test (`testFullCorpusLoadAndDispatchDoesNotCrash`)
+/// runs unconditionally — no env var or skip gate applies. Runtime is ~1.8 s.
 final class IFEvalLaneTests: XCTestCase {
 
     // MARK: - Corpus loading

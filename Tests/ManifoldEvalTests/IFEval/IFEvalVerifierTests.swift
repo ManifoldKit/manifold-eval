@@ -35,6 +35,20 @@ final class IFEvalVerifierTests: XCTestCase {
         XCTAssertFalse(v.verify(response: tooFew, kwargs: kw(("relation", .string("around")), ("num_words", .int(100)))))
     }
 
+    func testAroundToleranceFloor() {
+        // target=75 → tolerance = Int(75 * 0.1) = Int(7.5) = 7 (floor, not 8).
+        // Python uses int() which truncates, not round-to-nearest.
+        let v = WordCountVerifier()
+        // 82 words: |82-75|=7 ≤ 7 → passes within tolerance-7.
+        let eightyTwo = Array(repeating: "word", count: 82).joined(separator: " ")
+        XCTAssertTrue(v.verify(response: eightyTwo,
+                               kwargs: kw(("relation", .string("around")), ("num_words", .int(75)))))
+        // 83 words: |83-75|=8 > 7 → fails (would have passed with rounded-to-8 tolerance).
+        let eightyThree = Array(repeating: "word", count: 83).joined(separator: " ")
+        XCTAssertFalse(v.verify(response: eightyThree,
+                                kwargs: kw(("relation", .string("around")), ("num_words", .int(75)))))
+    }
+
     func testWordCountLessThan() {
         let v = WordCountVerifier()
         XCTAssertTrue(v.verify(response: "just five words here now",
@@ -45,6 +59,24 @@ final class IFEvalVerifierTests: XCTestCase {
 
     func testWordCountMissingKwargsFail() {
         XCTAssertFalse(WordCountVerifier().verify(response: "hello", kwargs: [:]))
+    }
+
+    func testWordCountMultilineCountsAllWhitespaceSeparated() {
+        // "first line\nsecond line\nthird line" has 6 words; splitting on
+        // space only (old behaviour) undercounts because the newlines are not
+        // treated as separators.
+        let v = WordCountVerifier()
+        let multiline = "first line\nsecond line\nthird line"
+        XCTAssertTrue(v.verify(response: multiline,
+                               kwargs: kw(("relation", .string("exactly")), ("num_words", .int(6)))))
+    }
+
+    func testWordCountNewlinesOnlyAreSeparators() {
+        // A response with only newlines between tokens (no spaces) must still
+        // count each token individually.
+        let v = WordCountVerifier()
+        XCTAssertTrue(v.verify(response: "alpha\nbeta\ngamma",
+                               kwargs: kw(("relation", .string("exactly")), ("num_words", .int(3)))))
     }
 
     // MARK: - Sentence count
@@ -64,6 +96,28 @@ final class IFEvalVerifierTests: XCTestCase {
         let v = SentenceCountVerifier()
         XCTAssertTrue(v.verify(response: "Why? Because! Sure.",
                                kwargs: kw(("relation", .string("exactly")), ("num_sentences", .int(3)))))
+    }
+
+    func testSentenceCountAbbreviationNotSplit() {
+        // "The U.S.A. has 50 states. We know it." must yield 2 sentences
+        // (the dots inside "U.S.A." are NOT followed by uppercase after
+        // whitespace, so they are not treated as sentence boundaries).
+        let v = SentenceCountVerifier()
+        XCTAssertTrue(v.verify(
+            response: "The U.S.A. has 50 states. We know it.",
+            kwargs: kw(("relation", .string("exactly")), ("num_sentences", .int(2)))
+        ))
+    }
+
+    func testSentenceCountDecimalNotSplit() {
+        // "3.5 billion people. They are here." → 2 sentences.
+        // The dot in "3.5" is followed by a digit, not whitespace+uppercase,
+        // so it is not a sentence boundary.
+        let v = SentenceCountVerifier()
+        XCTAssertTrue(v.verify(
+            response: "3.5 billion people. They are here.",
+            kwargs: kw(("relation", .string("exactly")), ("num_sentences", .int(2)))
+        ))
     }
 
     // MARK: - Paragraph count
@@ -275,11 +329,12 @@ final class IFEvalVerifierTests: XCTestCase {
                                 kwargs: kw(("num_highlights", .int(1)))))
     }
 
-    func testHighlightedSectionsBoldNotCounted() {
+    func testHighlightedSectionsBoldCountsAsOne() {
         let v = HighlightedSectionsVerifier()
-        // **bold** should not count as an italic highlight.
-        XCTAssertFalse(v.verify(response: "**bold** text",
-                                kwargs: kw(("num_highlights", .int(1)))))
+        // The IFEval Python reference regex \*[^*\n]+\* matches the inner
+        // *bold* span inside **bold**, so **bold** yields one highlighted span.
+        XCTAssertTrue(v.verify(response: "**bold** text",
+                               kwargs: kw(("num_highlights", .int(1)))))
     }
 
     // MARK: - Title
