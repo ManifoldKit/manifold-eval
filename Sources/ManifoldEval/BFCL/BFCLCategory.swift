@@ -64,5 +64,9 @@ public enum BFCLCategory: String, CaseIterable, Sendable {
 
     /// Gorilla BFCL v4 answers-file stem (nil for irrelevance, which has no
     /// possible_answer file in the Gorilla corpus).
+    ///
+    /// - Note: Gorilla v4 stores answers in `possible_answer/<stem>.json` — same
+    ///   stem as questions, different directory. The identical stem is intentional;
+    ///   ``BFCLCorpusFetcher`` handles the directory difference.
     public var gorillaAnswersStem: String? { hasGroundTruth ? gorillaQuestionsStem : nil }
 }

@@ -77,7 +77,10 @@ public enum BFCLCorpusFetcher {
 
         let (data, response) = try await URLSession.shared.data(from: remote)
 
-        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+        guard let http = response as? HTTPURLResponse else {
+            throw FetchError.badHTTPStatus(remote, code: -1)
+        }
+        if http.statusCode != 200 {
             throw FetchError.badHTTPStatus(remote, code: http.statusCode)
         }
 

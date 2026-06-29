@@ -219,9 +219,18 @@ public struct BFCLLane: Sendable {
         }
     }
 
-    /// Greedy injective matching: finds an injective mapping from ground-truth
-    /// calls to emitted calls such that every ground-truth call has a distinct
-    /// match. Returns true iff such a mapping exists.
+    /// Injective bipartite matching: returns true iff every ground-truth call can
+    /// be matched to a distinct emitted call under
+    /// ``ASTMatcher/match(call:against:)``.
+    ///
+    /// Uses Kuhn's augmenting-path algorithm (maximum bipartite matching). A
+    /// greedy scan is incorrect when multiple ground-truth entries are compatible
+    /// with the same emitted call — it can "steal" a call that a later GT entry
+    /// needs exclusively, producing a false negative even when a valid full
+    /// matching exists.
+    ///
+    /// Returns true iff the matching saturates all ground-truth entries (i.e. a
+    /// perfect matching from every GT entry to a distinct emitted call exists).
     ///
     /// Uses ``ASTMatcher/match(call:against:)`` as the per-pair predicate — the
     /// matching logic is not re-implemented here.
@@ -232,17 +241,37 @@ public struct BFCLLane: Sendable {
         guard !groundTruth.isEmpty else { return true }
         guard emittedCalls.count >= groundTruth.count else { return false }
 
-        var usedIndices = Set<Int>()
-        for expected in groundTruth {
-            guard let matchIdx = emittedCalls.indices.first(where: { idx in
-                !usedIndices.contains(idx) &&
-                ASTMatcher.match(call: emittedCalls[idx], against: expected).matched
-            }) else {
-                return false
+        // matchedTo[emitIdx] = GT index currently assigned to emittedCalls[emitIdx],
+        // or -1 when the emitted call is unmatched.
+        var matchedTo = [Int](repeating: -1, count: emittedCalls.count)
+
+        // Augmenting-path DFS: tries to route gtIdx to a free emitted call,
+        // recursively re-routing any already-matched GT entry if needed.
+        // visited[emitIdx] prevents revisiting the same emitted call in one DFS.
+        func augment(gtIdx: Int, visited: inout [Bool]) -> Bool {
+            for emitIdx in emittedCalls.indices {
+                guard !visited[emitIdx],
+                      ASTMatcher.match(call: emittedCalls[emitIdx],
+                                       against: groundTruth[gtIdx]).matched
+                else { continue }
+                visited[emitIdx] = true
+                if matchedTo[emitIdx] == -1
+                    || augment(gtIdx: matchedTo[emitIdx], visited: &visited) {
+                    matchedTo[emitIdx] = gtIdx
+                    return true
+                }
             }
-            usedIndices.insert(matchIdx)
+            return false
         }
-        return true
+
+        var totalMatched = 0
+        for gtIdx in groundTruth.indices {
+            var visited = [Bool](repeating: false, count: emittedCalls.count)
+            if augment(gtIdx: gtIdx, visited: &visited) {
+                totalMatched += 1
+            }
+        }
+        return totalMatched == groundTruth.count
     }
 
     // MARK: - Private: corpus loading

@@ -441,6 +441,45 @@ final class BFCLLaneTests: XCTestCase {
             "localDirectory source must report fullCorpusSourced = false (scaffold)")
     }
 
+    // MARK: - Bipartite injective matching regression (greedy false-negative)
+
+    /// Regression test for the greedy-matcher false-negative:
+    ///
+    ///   GT_0 = add(a:[1,2], b:[3])   // accepts add(a:1,b:3) OR add(a:2,b:3)
+    ///   GT_1 = add(a:[2],   b:[3])   // accepts only add(a:2,b:3)
+    ///   emitted = [add(a:2,b:3), add(a:1,b:3)]   // greedy-unfriendly order
+    ///
+    /// A valid perfect matching exists: add(a:1,b:3)→GT_0, add(a:2,b:3)→GT_1,
+    /// so the correct answer is PASS.  The greedy algorithm assigns add(a:2,b:3)
+    /// to GT_0 first, then finds no match for GT_1 → incorrect FAIL.
+    ///
+    /// Sabotage-verified: replacing Kuhn's algorithm with the old greedy scan
+    /// causes this test to fail, confirming the bipartite fix is load-bearing.
+    func testParallel_greedyFalseNegative_bipartiteMatch_passes() async throws {
+        let dir = try bfclFixtureDir().appendingPathComponent("GreedyRegression")
+        let lane = makeLane()
+
+        // Emit in greedy-unfriendly order: add(a:2,b:3) first, add(a:1,b:3) second.
+        // Greedy assigns add(a:2,b:3)→GT_0 (since 2∈[1,2]), then has no match
+        // for GT_1 (add(a:1,b:3) doesn't satisfy a:[2]).  Bipartite correctly
+        // finds add(a:1,b:3)→GT_0, add(a:2,b:3)→GT_1.
+        let result = await lane.run(
+            categories: [.parallel],
+            corpusSource: .localDirectory(dir),
+            emit: { _ in
+                [
+                    ToolCall(id: "1", toolName: "add", arguments: #"{"a":2,"b":3}"#),
+                    ToolCall(id: "2", toolName: "add", arguments: #"{"a":1,"b":3}"#)
+                ]
+            }
+        )
+
+        let parallel = try XCTUnwrap(result.categoryResults.first { $0.category == .parallel })
+        XCTAssertEqual(parallel.total, 1)
+        XCTAssertEqual(parallel.passed, 1,
+            "bipartite matching must find add(a:1,b:3)→GT_0 / add(a:2,b:3)→GT_1; greedy fails this")
+    }
+
     // MARK: - ASTMatcher reuse verification
 
     /// Confirms the lane delegates to `ManifoldTools.ASTMatcher.scoreCase` and
