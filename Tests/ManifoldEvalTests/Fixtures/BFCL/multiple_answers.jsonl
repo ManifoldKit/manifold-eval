@@ -1,0 +1,3 @@
+{"id":"multiple_0","ground_truth":[{"country_info.capital":{"country":["France"]}}]}
+{"id":"multiple_1","ground_truth":[{"math.circle_area":{"radius":[5,5.0]}}]}
+{"id":"multiple_2","ground_truth":[{"get_weather":{"city":["Tokyo"],"unit":["celsius",""]}}]}
