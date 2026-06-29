@@ -1,5 +1,11 @@
-.build/
-.swiftpm/
-*.xcodeproj
 .DS_Store
-Package.resolved.bak
+/.build
+/Packages
+xcuserdata/
+DerivedData/
+.swiftpm/configuration/registries.json
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+.netrc
+
+# eval run outputs (rendered matrices / collated records written by default)
+runs/

@@ -1,4 +1,4 @@
-name: build
+name: ci
 
 # Cheap gate: build + fixture-driven tests only (no models, no hardware). Mirrors
 # the ManifoldKit family's draft-skip discipline — CI runs only on a non-draft PR
