@@ -31,7 +31,8 @@ final class ExactMatchScorerTests: XCTestCase {
         let result = await scorer.score(output: output("43"), expected: "42")
 
         XCTAssertEqual(result.value, .bool(false))
-        XCTAssertNotNil(result.explanation, "a fail must explain the mismatch")
+        XCTAssertEqual(result.explanation?.contains("43"), true, "explanation names the actual output")
+        XCTAssertEqual(result.explanation?.contains("42"), true, "explanation names the expected value")
         XCTAssertEqual(result.answer, "43", "answer carries the raw model output on failure")
     }
 
@@ -148,15 +149,21 @@ final class ExactMatchScorerTests: XCTestCase {
     }
 
     func testTrimWhitespaceOnWhitespaceOnlyOutputAndEmptyExpected() async {
-        // A model that replies with only whitespace should NOT silently pass
-        // against an empty expected after trimming — they both collapse to ""
-        // after trim, so this is actually a pass. Documenting this explicitly
-        // so the behaviour is deliberate and not a surprise.
+        // Whitespace-only output and empty expected both trim to "", so this
+        // deliberately passes under trimWhitespace — documented so it's not a surprise.
         let scorer = ExactMatchScorer(options: .init(trimWhitespace: true))
         let result = await scorer.score(output: output("   "), expected: "")
 
         XCTAssertEqual(result.value, .bool(true),
             "both strings normalize to empty after trim; that is an intentional pass under trimWhitespace")
+    }
+
+    func testCaseInsensitiveNonASCIIIsLocaleStable() async {
+        // Locale-independent fold handles non-ASCII ("CAFÉ" vs "café") and pins
+        // "I"-folding so a Turkish-locale host can't diverge from CI.
+        let scorer = ExactMatchScorer(options: .init(caseInsensitive: true))
+        let result = await scorer.score(output: output("CAFÉ"), expected: "café")
+        XCTAssertEqual(result.value, .bool(true))
     }
 
     // MARK: - Score shape invariants

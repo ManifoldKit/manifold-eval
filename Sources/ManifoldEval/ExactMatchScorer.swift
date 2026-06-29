@@ -68,9 +68,8 @@ public struct ExactMatchScorer: EvalScorer, Sendable {
     // MARK: - EvalScorer
 
     public func score(output: EvalRunOutput, expected: String) async -> Score {
-        // Guard against accidentally scoring on the wrong field: if the output
-        // has no visible text at all, that is always a mismatch — never
-        // accidentally "pass" an empty run against an empty expected.
+        // Read from visibleText, not thinkingText — a scorer must not silently
+        // grade on the wrong field. (empty == empty is a deliberate pass; see tests.)
         let rawActual = output.visibleText
         let rawExpected = expected
 
@@ -83,8 +82,11 @@ public struct ExactMatchScorer: EvalScorer, Sendable {
         }
 
         if options.caseInsensitive {
-            normalizedActual = normalizedActual.lowercased()
-            normalizedExpected = normalizedExpected.lowercased()
+            // Locale-independent fold: bare String.lowercased() uses the current
+            // locale, so a Turkish-locale host would fold "I"→"ı" and diverge from
+            // CI. An eval scorer must be reproducible across environments.
+            normalizedActual = normalizedActual.lowercased(with: Locale(identifier: "en_US_POSIX"))
+            normalizedExpected = normalizedExpected.lowercased(with: Locale(identifier: "en_US_POSIX"))
         }
 
         let matched = normalizedActual == normalizedExpected
