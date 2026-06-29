@@ -22,7 +22,13 @@ func warn(_ message: String) {
 
 let arguments = Array(CommandLine.arguments.dropFirst())
 guard let subcommand = arguments.first else {
-    print("usage: manifold-eval collate <record.json>... [--out PATH] [--title T]")
+    print("usage:")
+    print("  manifold-eval collate <record.json>... [--out PATH] [--title T]")
+    print("  manifold-eval diff --model <ollama-tag> (--prompt-file P | --messages-file M --template-gguf G)")
+    print("                     [--llama-runner CMD] [--llama-model GGUF] [--repeats N] [--seed N]")
+    print("                     [--max-tokens N] [--temperature D] [--bos ID]")
+    print("                     [--cohort sameWeights|sameFamily|cloud] [--ollama-url URL]")
+    print("                     [--core-commit SHA] [--out DIVERGENCE.md]")
     exit(2)
 }
 
@@ -92,6 +98,11 @@ case "collate":
     // — mixed core commits, tooling drift — render and exit 0; they're advisory.
     exit(result.hasErrors ? 1 : 0)
 
+case "diff":
+    // Top-level `await` is permitted in main.swift (implicit async main). The diff
+    // orchestration lives in DiffCommand to keep this dispatch readable.
+    await DiffCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+
 default:
-    die("unknown subcommand '\(subcommand)' (expected: collate)", code: 2)
+    die("unknown subcommand '\(subcommand)' (expected: collate, diff)", code: 2)
 }
