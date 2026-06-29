@@ -14,8 +14,30 @@ public struct DeterminismReport: Sendable, Equatable {
         self.runs = runs
     }
 
-    /// The first run, used as the representative for cross-backend comparison.
-    public var representative: RawRun? { runs.first }
+    /// The run whose output is *modal* (most frequently reproduced) across the
+    /// batch, used as the representative for cross-backend comparison.
+    ///
+    /// Deliberately NOT `runs.first`: the first temp=0 request after model load can
+    /// be a cold-load outlier (observed 2026-06-29), so picking the cold run as the
+    /// representative would let a stable-warm leg whose cold run differs masquerade
+    /// as a genuine cross-backend divergence (S1). Picking the mode makes the
+    /// representative the steady state; ties resolve to the earliest run for
+    /// determinism. Falls back to the first run for an all-distinct batch.
+    public var representative: RawRun? {
+        guard !runs.isEmpty else { return nil }
+        var counts: [String: Int] = [:]
+        for run in runs { counts[run.output, default: 0] += 1 }
+        var best: RawRun?
+        var bestCount = 0
+        for run in runs {
+            let count = counts[run.output] ?? 0
+            if count > bestCount {
+                bestCount = count
+                best = run
+            }
+        }
+        return best
+    }
 
     public var backend: String? { runs.first?.backend }
 

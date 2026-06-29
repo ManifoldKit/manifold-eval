@@ -74,6 +74,14 @@ public enum DivergenceReport {
         case .tokenizerDivergence:
             return "Same prompt string, but the input token streams differ after BOS normalisation — a "
                 + "vocab/tokenisation mismatch fed the model different inputs."
+        case .samplerMismatch:
+            return "Same prompt and tokens, but the two legs ran under different sampler settings "
+                + "(temperature / topK / repeatPenalty) — the difference is config, not the model. "
+                + "Re-run both legs under the same sampler before trusting any verdict."
+        case .indeterminate:
+            return "A leg's determinism was never assessed (fewer than 2 repeats), so reproducibility "
+                + "is unknown — neither a clean pass nor a confirmed divergence. Re-run with more "
+                + "`--repeats` to resolve it."
         case .genuineDivergence:
             return "Same prompt, both backends reproducible, same input tokens — outputs still differ. "
                 + "**Genuine divergence: worth a human.**"

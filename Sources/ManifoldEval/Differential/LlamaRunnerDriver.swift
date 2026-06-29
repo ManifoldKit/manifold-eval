@@ -53,10 +53,17 @@ public struct LlamaRunnerDriver: Sendable {
             throw DifferentialError.runnerLaunchFailed(command: command, reason: "\(error)")
         }
 
-        // Read both pipes fully before waiting, so a runner that fills a pipe
-        // buffer can't deadlock against our wait.
-        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        // Drain BOTH pipes CONCURRENTLY before waiting. llama.cpp logs heavily to
+        // stderr; reading stdout to EOF first (or stderr only after stdout) lets the
+        // child wedge: once its stderr pipe buffer (~64 KB) fills, the child blocks
+        // writing stderr, never closes stdout, and the parent blocks forever on the
+        // stdout read. Reading both at once on separate threads keeps both buffers
+        // draining, so the child can always make progress regardless of stderr
+        // volume.
+        let (stdoutData, stderrData) = Self.drainConcurrently(
+            stdout: stdoutPipe.fileHandleForReading,
+            stderr: stderrPipe.fileHandleForReading
+        )
         process.waitUntilExit()
 
         let stderrString = String(data: stderrData, encoding: .utf8) ?? ""
@@ -87,5 +94,43 @@ public struct LlamaRunnerDriver: Sendable {
     /// Single-quote a value for `/bin/sh`, escaping embedded single quotes.
     static func shellQuote(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    /// Reads two file handles to EOF concurrently and returns their bytes. Each
+    /// handle is drained on its own queue so neither can back-pressure the child
+    /// into a deadlock (see `run` for the failure mode this prevents). The
+    /// `group.wait()` join establishes the happens-before edge that makes reading
+    /// the boxes back here race-free.
+    private static func drainConcurrently(
+        stdout: FileHandle,
+        stderr: FileHandle
+    ) -> (stdout: Data, stderr: Data) {
+        let outBox = DataBox()
+        let errBox = DataBox()
+        let group = DispatchGroup()
+        let queue = DispatchQueue(label: "manifold-eval.llama-runner-drain", attributes: .concurrent)
+        queue.async(group: group) { outBox.set(stdout.readDataToEndOfFile()) }
+        queue.async(group: group) { errBox.set(stderr.readDataToEndOfFile()) }
+        group.wait()
+        return (outBox.value, errBox.value)
+    }
+}
+
+/// A lock-guarded byte buffer so the two concurrent pipe-drain tasks can each
+/// publish their result and the joining thread can read it back. `@unchecked
+/// Sendable` is sound only because every access is serialised by the lock (CLAUDE.md
+/// concurrency gotcha #2: a real lock, not a bare mutable capture).
+private final class DataBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+    func set(_ value: Data) {
+        lock.lock()
+        defer { lock.unlock() }
+        data = value
+    }
+    var value: Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return data
     }
 }

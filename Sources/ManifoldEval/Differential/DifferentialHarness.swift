@@ -64,14 +64,28 @@ public struct DifferentialOutcome: Sendable, Equatable {
 /// Orchestrates a differential run: drive the Ollama leg N times, optionally drive
 /// the external runner N times against the *same* prompt file, then triage.
 public struct DifferentialHarness: Sendable {
-    let ollamaDriver: OllamaRawDriver
+    let ollamaDriver: any RawRunProducer
 
-    public init(ollamaDriver: OllamaRawDriver) {
+    public init(ollamaDriver: any RawRunProducer) {
         self.ollamaDriver = ollamaDriver
     }
 
     public func run(_ config: DifferentialConfig) async throws -> DifferentialOutcome {
         let promptSha = PromptHash.sha256Hex(of: config.prompt)
+
+        // Warmup-discard: Ollama's FIRST temp=0 request after model load can be a
+        // cold-load outlier (observed 2026-06-29) — a divergent first run would
+        // otherwise pollute the measured batch and downgrade a real cross-backend
+        // verdict to sampler noise (S1). One discarded warmup (repeatIndex -1, as the
+        // live smoke test does) lets the measured batch reflect steady state. A
+        // warmup failure is surfaced, not swallowed: if Ollama is down the measured
+        // batch would fail identically, so propagating here loses nothing.
+        _ = try await ollamaDriver.run(
+            model: config.ollamaModel,
+            prompt: config.prompt,
+            sampler: config.sampler,
+            repeatIndex: -1
+        )
 
         let ollamaReport = try await DeterminismHarness.measure(repeats: config.repeats) { index in
             try await ollamaDriver.run(
@@ -96,7 +110,17 @@ public struct DifferentialHarness: Sendable {
         // runner repeat — the runner's contract takes a --prompt-file, and reusing
         // one file guarantees the bytes are identical across repeats.
         let promptFile = try writeTempPrompt(config.prompt)
-        defer { try? FileManager.default.removeItem(at: promptFile) }
+        defer {
+            // Best-effort cleanup: surface a failure as a diagnostic rather than
+            // swallowing it with `try?` (banned in production paths).
+            do {
+                try FileManager.default.removeItem(at: promptFile)
+            } catch {
+                FileHandle.standardError.write(
+                    Data("[manifold-eval] could not remove temp prompt \(promptFile.path): \(error)\n".utf8)
+                )
+            }
+        }
 
         let runner = LlamaRunnerDriver(command: runnerCommand)
         let modelArg = config.llamaModelArg ?? config.ollamaModel

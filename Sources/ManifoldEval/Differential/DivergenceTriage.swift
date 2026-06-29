@@ -7,22 +7,31 @@ import Foundation
 /// so a human's attention is reserved for `genuineDivergence` alone. Order of the
 /// cascade is the contract — see ``DivergenceTriage/classify(_:_:aIsDeterministic:bIsDeterministic:bos:)``.
 public enum Divergence: String, Sendable, Equatable, Codable {
-    /// Same prompt hash, same output — nothing to explain.
+    /// Same prompt hash, same output, BOTH legs reproducible — nothing to explain.
     case identical
     /// Prompt hashes differ — the same-bytes control FAILED. The comparison is
     /// invalid (a harness bug, not a model finding). The most important guard: it
     /// catches when same-bytes was never achieved, so a render/BOS slip can never
     /// masquerade as a model divergence.
     case promptDivergence
-    /// Same prompt, outputs differ, and a backend is non-reproducible across its
-    /// own repeats → the difference is sampler noise, not signal.
-    case samplerNondeterminism
     /// Same prompt STRING but the input token streams differ (after BOS
     /// normalisation) → a vocab/tokenisation mismatch fed the model different
     /// inputs. The input control failed at the token level.
     case tokenizerDivergence
-    /// Same prompt, both backends reproducible, same input tokens — and the
-    /// outputs still differ. The only state worth a human: a genuine
+    /// Same prompt, same input tokens, but the two legs ran under DIFFERENT sampler
+    /// settings (the determinism-relevant fields: temperature, topK, repeatPenalty).
+    /// The output difference is explained by an unequal sampler, not the model — the
+    /// sampler-equality control failed.
+    case samplerMismatch
+    /// Same prompt, outputs differ, and a backend is non-reproducible across its
+    /// own repeats → the difference is sampler noise, not signal.
+    case samplerNondeterminism
+    /// Outputs differ (or match by luck) but a leg's determinism was never assessed
+    /// — fewer than two repeats, so reproducibility is unknown. NOT a clean pass and
+    /// NOT a confirmed divergence: rerun with more `--repeats` to resolve it.
+    case indeterminate
+    /// Same prompt, both backends reproducible, same input tokens, same sampler —
+    /// and the outputs still differ. The only state worth a human: a genuine
     /// runtime/renderer/model difference, every confound stripped.
     case genuineDivergence
 }
@@ -40,39 +49,65 @@ public enum DivergenceTriage {
     /// The cascade (precedence matters — earlier wins):
     /// 1. **promptDivergence** — `promptSha256` differ. Input-string control
     ///    failed; everything downstream is moot.
-    /// 2. **identical** — outputs equal. The strongest "no problem" signal; it
-    ///    wins even over a benign token difference (a tokenizer diff that yields
+    /// 2. **outputs equal** — the strongest "no problem" signal, BUT only trustworthy
+    ///    when both legs were assessed and reproducible: a match drawn from a
+    ///    non-reproducible leg is luck (`samplerNondeterminism`), and a match where a
+    ///    leg's determinism is unknown is `indeterminate` (S3). Wins over a benign
+    ///    token difference when it is trustworthy (a tokenizer diff that yields
     ///    identical output is not actionable).
     /// 3. **tokenizerDivergence** — outputs differ AND *both* legs report token
     ///    ids AND those streams differ after BOS normalisation. Tokenisation is
-    ///    deterministic and not subject to sampler noise, so a token mismatch is a
-    ///    real input-control failure regardless of reproducibility — hence it is
-    ///    checked before the nondeterminism confound. Skipped (not a divergence)
-    ///    when either leg reports an empty token stream: the contract reads empty
-    ///    as "tokenizer check unavailable" (the Ollama raw path).
-    /// 4. **samplerNondeterminism** — outputs differ, tokens match/unavailable,
-    ///    and a leg is non-reproducible over its repeats. The output comparison
-    ///    can't be trusted → noise.
-    /// 5. **genuineDivergence** — outputs differ, tokens match/unavailable, both
-    ///    legs reproducible. Residual signal worth a human.
+    ///    deterministic and not subject to sampler noise *or* repeat count, so a
+    ///    token mismatch is a real input-control failure regardless of
+    ///    reproducibility/assessment — hence it is checked before those confounds.
+    ///    Skipped (not a divergence) when either leg reports an empty token stream:
+    ///    the contract reads empty as "tokenizer check unavailable" (Ollama raw).
+    /// 4. **samplerMismatch** — outputs differ, tokens match/unavailable, but the two
+    ///    legs ran under different determinism-relevant sampler settings. The
+    ///    sampler-equality control failed; the difference is config, not model.
+    /// 5. **samplerNondeterminism** — outputs differ, tokens + sampler agree, and a
+    ///    leg was *observed* non-reproducible over its repeats. The output comparison
+    ///    can't be trusted → noise. (Observed noise outranks unknown assessment.)
+    /// 6. **indeterminate** — outputs differ (or match), tokens + sampler agree, no
+    ///    observed nondeterminism, but a leg's determinism was never assessed (< 2
+    ///    repeats). Neither pass nor finding — rerun with more repeats.
+    /// 7. **genuineDivergence** — outputs differ, every confound stripped and both
+    ///    legs assessed-reproducible. Residual signal worth a human.
     ///
     /// - Parameters:
     ///   - aIsDeterministic / bIsDeterministic: whether each leg produced an
-    ///     identical output across its own determinism repeats. With fewer than
-    ///     two repeats this is vacuously `true`; the caller is responsible for
-    ///     running enough repeats (default 3) for the signal to be meaningful.
+    ///     identical output across its own determinism repeats. Vacuously `true`
+    ///     with fewer than two repeats — pair with `aWasAssessed`/`bWasAssessed`.
+    ///   - aWasAssessed / bWasAssessed: whether each leg actually had >= 2 repeats,
+    ///     so `*IsDeterministic` carries real evidence rather than a vacuous default.
     public static func classify(
         _ a: RawRun,
         _ b: RawRun,
         aIsDeterministic: Bool,
         bIsDeterministic: Bool,
+        aWasAssessed: Bool = true,
+        bWasAssessed: Bool = true,
         bos: BOSNormalization = .autoDetect
     ) -> Divergence {
         // 1. Input-string control. The single most important guard.
         guard a.promptSha256 == b.promptSha256 else { return .promptDivergence }
 
-        // 2. Outputs agree → nothing to triage.
-        if a.output == b.output { return .identical }
+        // Reproducibility evidence: a leg is only trustworthy-reproducible when its
+        // determinism was actually observed (assessed) AND held.
+        let aReproducible = aWasAssessed && aIsDeterministic
+        let bReproducible = bWasAssessed && bIsDeterministic
+        let bothReproducible = aReproducible && bReproducible
+        // Positive evidence of noise (assessed and NOT deterministic) on either leg.
+        let observedNondeterminism = (aWasAssessed && !aIsDeterministic) || (bWasAssessed && !bIsDeterministic)
+        // A leg whose determinism we simply never measured.
+        let eitherUnassessed = !aWasAssessed || !bWasAssessed
+
+        // 2. Outputs agree → strongest "no problem" signal, but only when trustworthy.
+        if a.output == b.output {
+            if bothReproducible { return .identical }
+            if observedNondeterminism { return .samplerNondeterminism }
+            return .indeterminate
+        }
 
         // 3. Token-level input control. Only meaningful when BOTH legs expose
         //    tokenisation — an empty stream is "unavailable", never a divergence.
@@ -82,13 +117,33 @@ public enum DivergenceTriage {
             return .tokenizerDivergence
         }
 
-        // 4. Output-reproducibility confound.
-        if !aIsDeterministic || !bIsDeterministic {
+        // 4. Sampler-equality control: an unequal sampler explains the output diff.
+        if !samplersAgree(a.sampler, b.sampler) {
+            return .samplerMismatch
+        }
+
+        // 5. Observed nondeterminism — the output comparison can't be trusted.
+        if observedNondeterminism {
             return .samplerNondeterminism
         }
 
-        // 5. Every confound stripped — a genuine divergence.
+        // 6. Determinism never assessed on a leg — neither pass nor finding.
+        if eitherUnassessed {
+            return .indeterminate
+        }
+
+        // 7. Every confound stripped — a genuine divergence.
         return .genuineDivergence
+    }
+
+    /// Whether two samplers agree on the fields that actually shift the output
+    /// distribution at compare time (temperature, topK, repeatPenalty). `seed` and
+    /// `maxTokens` are intentionally excluded: at temp=0 the seed is moot, and a
+    /// differing maxTokens is a length cap, not a sampling-distribution confound.
+    private static func samplersAgree(_ a: SamplerConfig, _ b: SamplerConfig) -> Bool {
+        a.temperature == b.temperature
+            && a.topK == b.topK
+            && a.repeatPenalty == b.repeatPenalty
     }
 }
 
@@ -136,6 +191,8 @@ public struct DifferentialRecord: Sendable, Equatable {
             repA, repB,
             aIsDeterministic: a.isDeterministic,
             bIsDeterministic: b.isDeterministic,
+            aWasAssessed: a.wasAssessed,
+            bWasAssessed: b.wasAssessed,
             bos: bos
         )
         let detected = BOSNormalizer.detectBOS(repA.inputTokenIds, repB.inputTokenIds)

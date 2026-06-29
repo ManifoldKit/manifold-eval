@@ -90,6 +90,11 @@ enum DiffCommand {
         let prompt: String
         if let promptFile {
             do {
+                // NOTE: `String(contentsOfFile:encoding:.utf8)` strips a leading
+                // UTF-8 BOM. For a standalone llama run on a BOM'd prompt file the
+                // hashed bytes here would then differ from the raw file bytes the
+                // runner reads, surfacing as a false promptDivergence. Keep prompt
+                // files BOM-free (the same-bytes anchor is the UTF-8 content).
                 prompt = try String(contentsOfFile: promptFile, encoding: .utf8)
             } catch {
                 die("cannot read --prompt-file '\(promptFile)': \(error)", 1)
@@ -168,12 +173,29 @@ enum DiffCommand {
         }
 
         // Exit code reflects the verdict so CI/scripts can branch on it:
-        //   0 = no actionable divergence (identical / nondeterminism / Ollama-only)
-        //   1 = a control or genuine divergence a human should look at
-        switch outcome.comparison?.divergence {
-        case .promptDivergence, .tokenizerDivergence, .genuineDivergence:
+        //   0 = no actionable divergence (identical / samplerNondeterminism)
+        //   1 = a control failure or genuine divergence a human should look at
+        //       (promptDivergence / tokenizerDivergence / samplerMismatch /
+        //        genuineDivergence), OR an Ollama-only determinism control that came
+        //        back VARIANT (the control itself failed — N3)
+        //   3 = indeterminate — a leg's determinism was never assessed; rerun with
+        //       more --repeats (neither a clean pass nor a confirmed divergence)
+        guard let divergence = outcome.comparison?.divergence else {
+            // Ollama-only run: no cross-backend comparison, just the determinism
+            // control. A VARIANT control (assessed but not reproducible) is itself a
+            // finding worth surfacing; a stable or unassessed control passes.
+            if outcome.ollama.wasAssessed && !outcome.ollama.isDeterministic {
+                warn("Ollama determinism control came back VARIANT — temp=0 not reproducible")
+                exit(1)
+            }
+            exit(0)
+        }
+        switch divergence {
+        case .promptDivergence, .tokenizerDivergence, .samplerMismatch, .genuineDivergence:
             exit(1)
-        default:
+        case .indeterminate:
+            exit(3)
+        case .identical, .samplerNondeterminism:
             exit(0)
         }
     }

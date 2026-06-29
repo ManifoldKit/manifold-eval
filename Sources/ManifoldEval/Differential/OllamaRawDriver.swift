@@ -1,5 +1,17 @@
 import Foundation
 
+/// A backend leg that produces one ``RawRun`` per (prompt, repeat-index). The
+/// abstraction the differential harness drives for its "raw" leg, so the harness
+/// can be exercised against a fake producer in tests without a live Ollama.
+public protocol RawRunProducer: Sendable {
+    func run(
+        model: String,
+        prompt: String,
+        sampler: SamplerConfig,
+        repeatIndex: Int
+    ) async throws -> RawRun
+}
+
 /// Drives Ollama's raw-prompt completion path and emits a ``RawRun``.
 ///
 /// `raw: true` bypasses Ollama's own template (verified 2026-06-29, Ollama
@@ -11,7 +23,7 @@ import Foundation
 /// Ollama's `/api/generate` returns no token ids (only a `prompt_eval_count`), so
 /// `inputTokenIds` / `outputTokenIds` are `[]` — which the triage reads as
 /// "tokenizer check unavailable", never a divergence.
-public struct OllamaRawDriver: Sendable {
+public struct OllamaRawDriver: RawRunProducer, Sendable {
     public let baseURL: URL
     public let session: URLSession
     public let coreCommit: String

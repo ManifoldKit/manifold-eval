@@ -16,6 +16,7 @@ final class DifferentialTriageTests: XCTestCase {
         promptSha: String = "aaa",
         inputTokens: [Int] = [],
         output: String = "hello",
+        sampler: SamplerConfig = .greedy,
         repeatIndex: Int = 0
     ) -> RawRun {
         RawRun(
@@ -26,7 +27,7 @@ final class DifferentialTriageTests: XCTestCase {
             inputTokenIds: inputTokens,
             output: output,
             outputTokenIds: [],
-            sampler: .greedy,
+            sampler: sampler,
             coreCommit: "deadbeef",
             toolingVersions: ["ollama": "0.30.11"],
             repeatIndex: repeatIndex
@@ -169,6 +170,85 @@ final class DifferentialTriageTests: XCTestCase {
         XCTAssertEqual(DivergenceTriage.classify(a, b, aIsDeterministic: true, bIsDeterministic: true), .genuineDivergence)
     }
 
+    // MARK: - S2/S3: indeterminate + identical-gating
+
+    func testIndeterminateWhenOutputsDifferAndLegUnassessed() {
+        // S2: outputs differ but a leg was never assessed (< 2 repeats) → its
+        // reproducibility is unknown, so this is NOT a confirmed genuineDivergence.
+        let a = run(promptSha: "p", output: "x")
+        let b = run(promptSha: "p", output: "y")
+        XCTAssertEqual(
+            DivergenceTriage.classify(a, b, aIsDeterministic: true, bIsDeterministic: true,
+                                      aWasAssessed: false, bWasAssessed: true),
+            .indeterminate
+        )
+    }
+
+    func testIndeterminateWhenOutputsMatchButLegUnassessed() {
+        // S3: matching outputs are only "identical" when both legs are
+        // assessed-reproducible. An unassessed leg → indeterminate, not a false pass.
+        let a = run(promptSha: "p", output: "same")
+        let b = run(promptSha: "p", output: "same")
+        XCTAssertEqual(
+            DivergenceTriage.classify(a, b, aIsDeterministic: true, bIsDeterministic: true,
+                                      aWasAssessed: true, bWasAssessed: false),
+            .indeterminate
+        )
+    }
+
+    func testIdenticalRequiresBothLegsReproducible() {
+        // S3: matching outputs while a leg is observed non-reproducible is luck, not
+        // a clean pass → samplerNondeterminism, never identical.
+        let a = run(promptSha: "p", output: "same")
+        let b = run(promptSha: "p", output: "same")
+        XCTAssertEqual(
+            DivergenceTriage.classify(a, b, aIsDeterministic: false, bIsDeterministic: true),
+            .samplerNondeterminism
+        )
+    }
+
+    func testCompareSingleRepeatDifferingOutputsIsIndeterminate() {
+        // The concrete S2 bug: --repeats 1 makes isDeterministic vacuously true, so
+        // a single-repeat pair whose outputs differ must NOT yield genuineDivergence.
+        let ollama = DeterminismReport(runs: [run(backend: "ollama", promptSha: "p", output: "x")])
+        let llama = DeterminismReport(runs: [run(backend: "llama.cpp", promptSha: "p", output: "y")])
+        let record = DifferentialRecord.compare(ollama, llama)
+        XCTAssertEqual(record?.divergence, .indeterminate, "single-repeat differing outputs → indeterminate, not genuine")
+    }
+
+    // MARK: - S6: sampler-mismatch confound
+
+    func testSamplerMismatchWhenSamplersDiffer() {
+        // Outputs differ, tokens unavailable, both reproducible — but the legs ran
+        // under different temperatures → the difference is config, not the model.
+        let a = run(promptSha: "p", output: "x", sampler: SamplerConfig(temperature: 0.0))
+        let b = run(promptSha: "p", output: "y", sampler: SamplerConfig(temperature: 0.7))
+        XCTAssertEqual(
+            DivergenceTriage.classify(a, b, aIsDeterministic: true, bIsDeterministic: true),
+            .samplerMismatch
+        )
+    }
+
+    func testSamplerMismatchDoesNotFireWhenOutputsMatch() {
+        // Equal outputs are not actionable regardless of sampler — identical wins.
+        let a = run(promptSha: "p", output: "same", sampler: SamplerConfig(temperature: 0.0))
+        let b = run(promptSha: "p", output: "same", sampler: SamplerConfig(temperature: 0.7))
+        XCTAssertEqual(
+            DivergenceTriage.classify(a, b, aIsDeterministic: true, bIsDeterministic: true),
+            .identical
+        )
+    }
+
+    func testGenuineDivergenceRequiresSamplerAgreement() {
+        // Same sampler on both legs is a precondition for genuineDivergence.
+        let a = run(promptSha: "p", output: "x", sampler: SamplerConfig(temperature: 0.0, repeatPenalty: 1.1))
+        let b = run(promptSha: "p", output: "y", sampler: SamplerConfig(temperature: 0.0, repeatPenalty: 1.1))
+        XCTAssertEqual(
+            DivergenceTriage.classify(a, b, aIsDeterministic: true, bIsDeterministic: true),
+            .genuineDivergence
+        )
+    }
+
     func testIdenticalWinsOverBenignTokenDifference() {
         // Outputs match but token streams differ → identical (a tokenizer diff that
         // produces identical output is not actionable).
@@ -192,6 +272,19 @@ final class DifferentialTriageTests: XCTestCase {
         let report = DeterminismReport(runs: [run(output: "cold"), run(output: "warm"), run(output: "warm")])
         XCTAssertFalse(report.isDeterministic)
         XCTAssertEqual(report.distinctOutputs, ["cold", "warm"])
+    }
+
+    func testRepresentativeIsModalNotColdFirstRun() {
+        // S1: a cold-load outlier as the first run must NOT become the
+        // representative — the steady-state (modal) output wins, so a stable-warm
+        // leg isn't downgraded by its cold run.
+        let report = DeterminismReport(runs: [run(output: "cold"), run(output: "warm"), run(output: "warm")])
+        XCTAssertEqual(report.representative?.output, "warm")
+    }
+
+    func testRepresentativeFallsBackToFirstWhenAllDistinct() {
+        let report = DeterminismReport(runs: [run(output: "a"), run(output: "b"), run(output: "c")])
+        XCTAssertEqual(report.representative?.output, "a", "all-distinct ties resolve to the earliest run")
     }
 
     func testDeterminismNotAssessedWithOneRun() {
@@ -218,15 +311,26 @@ final class DifferentialTriageTests: XCTestCase {
 
     // MARK: - Cohort
 
-    func testCohortSameWeightsOnEqualQuant() {
-        let a = run(backend: "ollama", quant: "Q4_K_M")
-        let b = run(backend: "llama.cpp", quant: "q4_k_m")  // case-insensitive
+    func testCohortSameWeightsOnEqualModelAndQuant() {
+        // Same model identity ("m" for both, via the builder default) AND equal quant
+        // (case-insensitive) → sameWeights.
+        let a = run(backend: "ollama", model: "m", quant: "Q4_K_M")
+        let b = run(backend: "llama.cpp", model: "m", quant: "q4_k_m")  // case-insensitive
         XCTAssertEqual(Cohort.classify(a, b), .sameWeights)
     }
 
+    func testCohortDifferentModelSameQuantIsNotSameWeights() {
+        // S4: equal quant alone must NOT claim sameWeights — two unrelated Ollama
+        // models both report quant "server", which would falsely fuse them into the
+        // only strong oracle. Differing model drops the pair to sameFamily.
+        let a = run(backend: "ollama", model: "llama3.1-8b:latest", quant: "server")
+        let b = run(backend: "ollama", model: "qwen2.5-7b:latest", quant: "server")
+        XCTAssertEqual(Cohort.classify(a, b), .sameFamily)
+    }
+
     func testCohortSameFamilyOnDifferentQuant() {
-        let a = run(backend: "llama.cpp", quant: "Q4_K_M")
-        let b = run(backend: "mlx", quant: "4bit")
+        let a = run(backend: "llama.cpp", model: "m", quant: "Q4_K_M")
+        let b = run(backend: "mlx", model: "m", quant: "4bit")
         XCTAssertEqual(Cohort.classify(a, b), .sameFamily)
     }
 
@@ -239,12 +343,21 @@ final class DifferentialTriageTests: XCTestCase {
     // MARK: - DifferentialRecord
 
     func testCompareBuildsRecordWithTriageAndCohort() {
-        let ollama = DeterminismReport(runs: [run(backend: "ollama", quant: "server", promptSha: "p", output: "x")])
-        let llama = DeterminismReport(runs: [run(backend: "llama.cpp", quant: "server", promptSha: "p", output: "y")])
+        // Two assessed (>= 2), reproducible legs with the same model + quant but
+        // differing output → a genuine cross-backend divergence in the sameWeights
+        // cohort.
+        let ollama = DeterminismReport(runs: [
+            run(backend: "ollama", quant: "server", promptSha: "p", output: "x"),
+            run(backend: "ollama", quant: "server", promptSha: "p", output: "x"),
+        ])
+        let llama = DeterminismReport(runs: [
+            run(backend: "llama.cpp", quant: "server", promptSha: "p", output: "y"),
+            run(backend: "llama.cpp", quant: "server", promptSha: "p", output: "y"),
+        ])
         let record = DifferentialRecord.compare(ollama, llama)
         XCTAssertNotNil(record)
         XCTAssertEqual(record?.divergence, .genuineDivergence)
-        XCTAssertEqual(record?.cohort, .sameWeights, "equal quant → sameWeights")
+        XCTAssertEqual(record?.cohort, .sameWeights, "equal model + quant → sameWeights")
     }
 
     func testCompareHonorsCohortOverride() {
@@ -265,8 +378,14 @@ final class DifferentialTriageTests: XCTestCase {
     // MARK: - Report rendering
 
     func testReportIsDeterministicAndCarriesVerdict() {
-        let ollama = DeterminismReport(runs: [run(backend: "ollama", promptSha: "p", output: "x")])
-        let llama = DeterminismReport(runs: [run(backend: "llama.cpp", promptSha: "p", output: "y")])
+        let ollama = DeterminismReport(runs: [
+            run(backend: "ollama", promptSha: "p", output: "x"),
+            run(backend: "ollama", promptSha: "p", output: "x"),
+        ])
+        let llama = DeterminismReport(runs: [
+            run(backend: "llama.cpp", promptSha: "p", output: "y"),
+            run(backend: "llama.cpp", promptSha: "p", output: "y"),
+        ])
         let record = DifferentialRecord.compare(ollama, llama)
         let outcome = DifferentialOutcome(promptSha256: "p", ollama: ollama, llama: llama, comparison: record)
         let first = DivergenceReport.render(outcome)

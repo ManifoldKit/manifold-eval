@@ -30,15 +30,19 @@ extension Cohort {
     ///
     /// This is a *heuristic over what the runs report*, not a guarantee: actually
     /// pinning the identical GGUF to both backends is the harness operator's job
-    /// (the Cohort-A setup). Given that, equal quant is the signal that the same
-    /// checkpoint is in play; differing quant drops the pair to same-family
+    /// (the Cohort-A setup). `.sameWeights` requires BOTH the model identity AND the
+    /// quant to match — equal quant *alone* is far too weak, because Ollama hides its
+    /// quant behind the constant `"server"`, so two unrelated Ollama models would
+    /// otherwise both report `quant == "server"` and be falsely fused into the only
+    /// strong oracle. Differing quant (or model) drops the pair to same-family
     /// (trend-only); a cloud backend on either side forces `.cloud`.
     ///
-    /// Known blind spot: Ollama hides the quant behind `"server"`, so an
-    /// Ollama-vs-llama same-GGUF pair (the real Cohort A) reads here as
-    /// `.sameFamily`, *under*-claiming. The operator therefore declares the cohort
-    /// explicitly on the harness config when they know the weights are pinned;
-    /// this classifier is only the fallback when they don't.
+    /// Known consequence: because Ollama reports `model` as a tag and a llama runner
+    /// reports it as a GGUF path, a *real* Ollama-vs-llama same-GGUF pair (Cohort A)
+    /// will NOT match on `model` here and reads as `.sameFamily`, *under*-claiming.
+    /// That is intentional — over-claiming `.sameWeights` is the dangerous error. The
+    /// operator declares the cohort explicitly (`cohortOverride`) when they know the
+    /// weights are pinned; this classifier is only the fallback when they don't.
     public static func classify(
         _ a: RawRun,
         _ b: RawRun,
@@ -51,9 +55,12 @@ extension Cohort {
         if isCloud(a.backend) || isCloud(b.backend) {
             return .cloud
         }
-        // Same quant ⇒ presumed same checkpoint (the operator pinned one GGUF to
-        // both). Case-insensitive so "q4_k_m" and "Q4_K_M" match.
-        if a.quant.lowercased() == b.quant.lowercased() {
+        // Same model AND same quant ⇒ presumed same checkpoint. Both required:
+        // quant alone over-claims (Ollama's "server" sentinel). Case-insensitive so
+        // "q4_k_m" / "Q4_K_M" and tag-case differences match.
+        let sameModel = a.model.lowercased() == b.model.lowercased()
+        let sameQuant = a.quant.lowercased() == b.quant.lowercased()
+        if sameModel && sameQuant {
             return .sameWeights
         }
         return .sameFamily
