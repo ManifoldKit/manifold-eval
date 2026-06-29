@@ -1,0 +1,18 @@
+[
+  {
+    "backend": "ollama",
+    "model": "mistral-7b-instruct-v0.3",
+    "quant": "server",
+    "renderer": "ollama-server",
+    "scenario": "weather-lookup",
+    "decoyLevel": 0,
+    "repeatIndex": 0,
+    "status": { "kind": "measured" },
+    "verdict": "pass",
+    "toolSelection": { "precision": 1.0, "recall": 1.0, "f1": 1.0 },
+    "failureClass": null,
+    "transcriptRef": "ollama/weather-lookup.jsonl",
+    "coreCommit": "4461529f",
+    "toolingVersions": { "ollama": "0.30.11" }
+  }
+]
