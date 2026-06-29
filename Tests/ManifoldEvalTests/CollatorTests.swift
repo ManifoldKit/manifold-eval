@@ -58,6 +58,38 @@ final class CollatorTests: XCTestCase {
         XCTAssertEqual(commitWarnings.count, 1, "mixed core commits must raise exactly one warning")
     }
 
+    func testToolingDriftWarns() throws {
+        // Same backend (llama.cpp) and same coreCommit, but b8772 vs b8773 — an
+        // environment drift that could masquerade as a regression.
+        let result = try Collator.collate(files: [
+            try fixture("llama-mistral"),       // llama.cpp @ b8772
+            try fixture("llama-mistral-drift"), // llama.cpp @ b8773
+        ])
+
+        XCTAssertEqual(result.coreCommits, ["4461529f"], "same commit → no commit warning")
+        let driftWarnings = result.diagnostics.filter {
+            $0.severity == .warning && $0.message.contains("tooling-version")
+        }
+        XCTAssertEqual(driftWarnings.count, 1, "same-backend tooling drift must raise exactly one warning")
+        let commitWarnings = result.diagnostics.filter { $0.message.contains("core commit") }
+        XCTAssertTrue(commitWarnings.isEmpty, "same-commit set must not raise a commit warning")
+    }
+
+    func testZeroYieldLegWarns() throws {
+        // A well-formed but empty leg is a hole, not "measured nothing" — it must
+        // be surfaced even when other legs produced records (review finding #1).
+        let ollama = try Data(contentsOf: try fixture("ollama-mistral"))
+        let empty = try XCTUnwrap("[]".data(using: .utf8))
+        let result = try Collator.collate(jsonArrays: [ollama, empty])
+
+        XCTAssertEqual(result.records.count, 1, "the non-empty leg still contributes")
+        XCTAssertFalse(result.hasErrors, "one empty leg among several is advisory, not fatal")
+        let zeroWarnings = result.diagnostics.filter {
+            $0.severity == .warning && $0.message.contains("0 records")
+        }
+        XCTAssertEqual(zeroWarnings.count, 1, "a zero-yield leg must raise exactly one warning")
+    }
+
     // MARK: failure modes — never silently skip a leg
 
     func testEmptyInputThrows() {

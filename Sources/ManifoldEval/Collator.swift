@@ -76,6 +76,7 @@ public enum Collator {
         guard !files.isEmpty else { throw CollationError.noInput }
 
         var merged: [ConformanceRecord] = []
+        var zeroYield: [String] = []
         let decoder = JSONDecoder()
         for url in files {
             let data: Data
@@ -84,13 +85,16 @@ public enum Collator {
             } catch {
                 throw CollationError.unreadable(path: url.path, reason: "\(error)")
             }
+            let records: [ConformanceRecord]
             do {
-                merged.append(contentsOf: try decoder.decode([ConformanceRecord].self, from: data))
+                records = try decoder.decode([ConformanceRecord].self, from: data)
             } catch {
                 throw CollationError.undecodable(path: url.path, reason: "\(error)")
             }
+            if records.isEmpty { zeroYield.append(url.lastPathComponent) }
+            merged.append(contentsOf: records)
         }
-        return finalize(merged)
+        return finalize(merged, zeroYieldInputs: zeroYield)
     }
 
     /// Collate already-loaded JSON array payloads (one per leg). Used by tests and
@@ -99,28 +103,44 @@ public enum Collator {
         guard !jsonArrays.isEmpty else { throw CollationError.noInput }
 
         var merged: [ConformanceRecord] = []
+        var zeroYield: [String] = []
         let decoder = JSONDecoder()
         for (index, data) in jsonArrays.enumerated() {
+            let records: [ConformanceRecord]
             do {
-                merged.append(contentsOf: try decoder.decode([ConformanceRecord].self, from: data))
+                records = try decoder.decode([ConformanceRecord].self, from: data)
             } catch {
                 throw CollationError.undecodable(path: "array[\(index)]", reason: "\(error)")
             }
+            if records.isEmpty { zeroYield.append("array[\(index)]") }
+            merged.append(contentsOf: records)
         }
-        return finalize(merged)
+        return finalize(merged, zeroYieldInputs: zeroYield)
     }
 
     // MARK: - Guards
 
-    static func finalize(_ records: [ConformanceRecord]) -> CollationResult {
-        guard !records.isEmpty else {
-            return CollationResult(
-                records: [],
-                diagnostics: [.init(severity: .error, message: "collated 0 records — nothing to compare")]
-            )
+    static func finalize(_ records: [ConformanceRecord], zeroYieldInputs: [String]) -> CollationResult {
+        var diagnostics: [CollationDiagnostic] = []
+
+        // A well-formed but EMPTY leg is a hole, not "measured nothing". Surface
+        // every zero-yield input so a missing or failed leg can never silently
+        // vanish from the matrix — the exact "absence reads as measured" defect
+        // the ConformanceRecord/CellStatus schema exists to prevent. The collator
+        // can't know the expected leg count, but it can flag a file that produced
+        // no records.
+        for label in zeroYieldInputs {
+            diagnostics.append(.init(
+                severity: .warning,
+                message: "input '\(label)' contained 0 records — that leg measured nothing; "
+                    + "a missing or failed leg must not silently vanish from the matrix."
+            ))
         }
 
-        var diagnostics: [CollationDiagnostic] = []
+        guard !records.isEmpty else {
+            diagnostics.append(.init(severity: .error, message: "collated 0 records — nothing to compare"))
+            return CollationResult(records: [], diagnostics: diagnostics)
+        }
 
         // Comparability guard: cross-runtime comparison is only valid within one
         // core binary. A mixed set still renders (the matrix is informative), but

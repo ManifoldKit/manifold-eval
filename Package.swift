@@ -24,10 +24,12 @@ let package = Package(
         .executable(name: "manifold-eval", targets: ["manifold-eval"]),
     ],
     dependencies: [
-        // Pinned to a released tag for lockstep: ManifoldKit's core-bump.yml bumps
-        // this pin on each core release (plan §10). v0.63.0 is the first tag that
-        // carries the ConformanceRecord / MatrixRenderer surface P1 consumes.
-        .package(url: "https://github.com/ManifoldKit/ManifoldKit.git", from: "0.63.0"),
+        // EXACT pin, not a range: an assurance repo whose premise is comparability
+        // against a specific core binary must not float its own core dependency
+        // (the coreCommit guard is meaningless if the consumer drifts). core-bump.yml
+        // bumps this exact version on each core release (plan §10). v0.63.0 is the
+        // first tag carrying the ConformanceRecord / MatrixRenderer surface P1 uses.
+        .package(url: "https://github.com/ManifoldKit/ManifoldKit.git", exact: "0.63.0"),
     ],
     targets: [
         .target(

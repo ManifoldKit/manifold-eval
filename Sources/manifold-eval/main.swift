@@ -46,9 +46,21 @@ case "collate":
             guard index < rest.count else { die("--title requires a value", code: 2) }
             title = rest[index]
         default:
+            // An unrecognized `--flag` is a usage error, not a filename — otherwise
+            // a typo'd flag (e.g. `--titel`) silently becomes a "record file" that
+            // later fails as unreadable with a confusing message.
+            if token.hasPrefix("--") {
+                die("unknown flag '\(token)'", code: 2)
+            }
             files.append(URL(fileURLWithPath: token))
         }
         index += 1
+    }
+
+    // Insufficient arguments is a usage error (exit 2), consistent with the
+    // no-subcommand case — not a runtime error (exit 1).
+    guard !files.isEmpty else {
+        die("collate requires at least one record file", code: 2)
     }
 
     let result: CollationResult
