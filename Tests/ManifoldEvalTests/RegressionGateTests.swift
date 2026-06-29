@@ -157,7 +157,7 @@ final class RegressionGateTests: XCTestCase {
         // reproduce the same prompt (e.g. the original prompt string was lost).
         let reDriven = makeRun(
             output: "Paris",
-            promptSha256: "11223344000000001122334400000000112233440000000011223344000000000"
+            promptSha256: "1122334400000000112233440000000011223344000000001122334400000000"
         )
         let scorer = MockRegressionScorer(fixedScore: 0.9)
 

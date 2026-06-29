@@ -92,6 +92,17 @@ public struct RegressionGate: Sendable {
         reDriven: RawRun,
         scorer: some RegressionScorer
     ) throws -> RegressionVerdict {
+        // Reject misconfiguration as .indeterminate rather than trapping or
+        // fabricating a verdict: a negative threshold makes |delta| <= threshold
+        // permanently false (every run reads as moved), and a baselineScore outside
+        // the [0,1] the RegressionScorer contract promises inflates delta silently.
+        guard threshold >= 0 else {
+            return .indeterminate(reason: "threshold \(threshold) is negative; must be non-negative")
+        }
+        guard (0...1).contains(baselineScore) else {
+            return .indeterminate(reason: "baselineScore \(baselineScore) outside [0, 1]")
+        }
+
         // Prompt-hash invariant: a score difference attributable to a different
         // task is not a model regression. Return .indeterminate rather than a
         // fabricated verdict — the caller must ensure prompt string fidelity.
