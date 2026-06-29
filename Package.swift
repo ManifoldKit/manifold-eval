@@ -36,6 +36,13 @@ let package = Package(
             name: "ManifoldEval",
             dependencies: [
                 .product(name: "ManifoldTools", package: "ManifoldKit"),
+                // P2.1 prompt-rendering seam: render messages→prompt ONCE via the
+                // PUBLIC `ChatTemplate.format` (ManifoldInference) over the GGUF's
+                // embedded chat_template, read via `ModelInfo.chatTemplateRaw`
+                // (ManifoldModelCatalog). One renderer of record — see
+                // Differential/PromptRendering.swift.
+                .product(name: "ManifoldInference", package: "ManifoldKit"),
+                .product(name: "ManifoldModelCatalog", package: "ManifoldKit"),
             ]
         ),
         .executableTarget(
