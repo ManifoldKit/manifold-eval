@@ -54,7 +54,12 @@ let package = Package(
         ),
         .testTarget(
             name: "ManifoldEvalTests",
-            dependencies: ["ManifoldEval"],
+            dependencies: [
+                "ManifoldEval",
+                // EmbeddingBackend (from ManifoldContract via ManifoldInference) is needed
+                // for the MTEB test double (AlwaysFailEmbedder) and the live embedding tests.
+                .product(name: "ManifoldInference", package: "ManifoldKit"),
+            ],
             resources: [.copy("Fixtures")]
         ),
     ]
