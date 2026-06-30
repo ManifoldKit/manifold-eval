@@ -40,7 +40,10 @@ public extension BFCLLane {
         for line in text.components(separatedBy: .newlines) {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
-            guard let data = trimmed.data(using: .utf8) else { continue }
+            // Data(_:.utf8) is non-failable — no silent line-drop (the prior
+            // `data(using:)`-guard-continue could mask a bad line; aligns with the
+            // IFEval loader, which surfaces rather than skips).
+            let data = Data(trimmed.utf8)
             do {
                 entries.append(try decoder.decode(BFCLResponseEntry.self, from: data))
             } catch {

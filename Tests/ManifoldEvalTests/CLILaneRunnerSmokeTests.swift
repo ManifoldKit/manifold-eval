@@ -137,11 +137,11 @@ final class CLILaneRunnerSmokeTests: XCTestCase {
         let lane = BFCLLane()
         let (result, markdown) = try await lane.cliRun(corpusDir: corpusDir, responsesURL: responsesURL)
 
-        let simple = result.categoryResults.first { $0.category == .simple }
-        if let simple, !simple.skipped {
-            XCTAssertEqual(simple.passed, 1, "simple_0 should pass with the correct call")
-            XCTAssertEqual(simple.total, 3)
-        }
+        let simple = try XCTUnwrap(result.categoryResults.first { $0.category == .simple },
+            "fixture must contain a 'simple' category")
+        XCTAssertFalse(simple.skipped, "simple category must not be skipped in the fixture run")
+        XCTAssertEqual(simple.passed, 1, "simple_0 should pass with the correct call")
+        XCTAssertEqual(simple.total, 3)
 
         XCTAssert(markdown.contains("simple"), "report must mention 'simple' category")
     }
