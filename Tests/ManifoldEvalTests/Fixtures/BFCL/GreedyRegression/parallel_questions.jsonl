@@ -1,0 +1,1 @@
+{"id":"greedy_regression_0","question":[[{"role":"user","content":"Add one of [1,2] to 3, and also add 2 to 3."}]],"function":[{"name":"add","description":"Add two integers and return the sum.","parameters":{"type":"dict","properties":{"a":{"type":"integer","description":"The first addend."},"b":{"type":"integer","description":"The second addend."}},"required":["a","b"]}}]}

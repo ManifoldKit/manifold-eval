@@ -1,0 +1,2 @@
+{"id":"parallel_multiple_0","ground_truth":[{"get_weather":{"city":["London"]}},{"convert_currency":{"amount":[100,100.0],"from_currency":["USD"],"to_currency":["EUR"]}}]}
+{"id":"parallel_multiple_1","ground_truth":[{"calculate_triangle_area":{"base":[6,6.0],"height":[4,4.0]}},{"convert_distance":{"value":[50,50.0],"from_unit":["km"],"to_unit":["miles","mi"]}}]}
