@@ -54,12 +54,15 @@ public protocol RegressionScorer: Sendable {
 /// mismatch to a model change — the gate returns ``.indeterminate`` instead
 /// of a false verdict.
 ///
-/// # Not yet wired to a real re-driver
+/// # Producing the `reDriven` argument
 ///
-/// Producing the `reDriven` argument requires a ``RecordReDriver``
-/// implementation, which is blocked on the core `Replayer.runOnce` extraction
-/// and the config-lossy plumbing fix (see ``RecordReDriver`` for details).
-/// Use ``MockRecordReDriver`` (test-only) to exercise the gate on fixtures.
+/// The re-driven ``RawRun`` comes from re-driving the captured prompt against a
+/// *different-quant* GGUF (or a different runtime) — the same separate-process
+/// machinery the differential harness already uses (``LlamaRunnerDriver`` /
+/// ``OllamaRawDriver``). ``RegressionRunner`` orchestrates the two captures and
+/// this gate; the `regress` CLI subcommand is the end-to-end entry point. The
+/// gate itself stays pure: it only reads `reDriven.output` and `promptSha256`,
+/// so any producer of a ``RawRun`` for the same prompt satisfies it.
 public struct RegressionGate: Sendable {
 
     /// The minimum |delta| that constitutes a detectable score movement.
@@ -80,8 +83,8 @@ public struct RegressionGate: Sendable {
     ///     Pre-computing the baseline score (rather than re-scoring it here)
     ///     keeps the baseline value stable across successive re-drives against
     ///     new builds — the baseline is ground truth, not re-derived each time.
-    ///   - reDriven: The freshly re-driven ``RawRun`` (from a
-    ///     ``RecordReDriver``, or a fixture ``MockRecordReDriver`` in tests).
+    ///   - reDriven: The freshly re-driven ``RawRun`` (from ``RegressionRunner``
+    ///     driving a real backend, or a fixture ``RawRun`` in tests).
     ///   - scorer: Applied to `reDriven.output` to produce the re-driven score.
     ///     Injected so the gate is not coupled to any specific scoring strategy.
     /// - Returns: ``.stable``, ``.moved(delta:)``, or ``.indeterminate(reason:)``.

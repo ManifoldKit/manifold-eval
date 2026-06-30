@@ -14,11 +14,10 @@ import XCTest
 ///
 /// - **Real:** ``RegressionGate`` verdict logic, the prompt-hash invariant,
 ///   threshold arithmetic, and the scorer injection seam.
-/// - **Stubbed:** ``MockRecordReDriver`` (test-only) and
-///   ``MockRegressionScorer`` (test-only). Neither is wired to a backend.
-///   A production ``RecordReDriver`` requires the `Replayer.runOnce`
-///   extraction from ManifoldFuzz and the config-lossy plumbing fix — both
-///   deferred (see ``RecordReDriver`` doc comment for details).
+/// - **Test-only:** ``MockRegressionScorer`` returns a fixed score so the gate's
+///   arithmetic can be exercised on fixtures. The *runner* that produces real
+///   ``RawRun``s (``RegressionRunner``) is tested in `RegressionRunnerTests`; the
+///   production scorers in `RegressionScorersTests`.
 final class RegressionGateTests: XCTestCase {
 
     // MARK: - Fixture helpers
@@ -203,55 +202,9 @@ final class RegressionGateTests: XCTestCase {
         }
     }
 
-    // MARK: - MockRecordReDriver demonstration
-
-    /// Demonstrates the ``RecordReDriver`` seam: a mock re-driver returning a
-    /// fixture run produces the expected verdict when passed through the gate.
-    ///
-    /// This test is the "wiring skeleton" that a real re-driver will satisfy
-    /// once ``RecordReDriver`` has a production implementation.
-    func testMockReDriverProducesExpectedVerdict() async throws {
-        let baselineRun = makeRun(output: "Paris")
-        let reDrivenRun = makeRun(output: "Berlin") // different output → score drop
-
-        // MockRecordReDriver returns the pre-baked reDrivenRun regardless of
-        // what prompt or sampler is passed — it is a fixture stand-in only.
-        let reDriver = MockRecordReDriver(fixedRun: reDrivenRun)
-        let reDriven = try await reDriver.reDrive(prompt: "What is the capital of France?", sampler: .greedy)
-
-        let gate = RegressionGate(threshold: 0.05)
-        // Scorer assigns 0.0 for "Berlin" (wrong answer), 0.9 for anything else.
-        let scorer = MockRegressionScorer(fixedScore: 0.0)
-
-        let verdict = try gate.check(
-            baseline: baselineRun, baselineScore: 0.9,
-            reDriven: reDriven, scorer: scorer
-        )
-
-        switch verdict {
-        case .moved(let delta):
-            XCTAssertLessThan(delta, 0, "wrong answer should degrade the score")
-        default:
-            XCTFail("expected .moved(delta:), got \(verdict)")
-        }
-    }
 }
 
 // MARK: - Test-only fixtures
-
-/// Fixture-only re-driver that returns a pre-baked ``RawRun`` regardless of
-/// the prompt or sampler it receives. Use only in tests.
-///
-/// NOT a production implementation. A real ``RecordReDriver`` requires the
-/// `Replayer.runOnce` extraction from ManifoldFuzz (deferred — see
-/// ``RecordReDriver`` doc comment for the full unblocking checklist).
-private struct MockRecordReDriver: RecordReDriver {
-    let fixedRun: RawRun
-
-    func reDrive(prompt: String, sampler: SamplerConfig) async throws -> RawRun {
-        fixedRun
-    }
-}
 
 /// Fixture-only scorer that returns a constant score for every output.
 /// Use only in tests.
