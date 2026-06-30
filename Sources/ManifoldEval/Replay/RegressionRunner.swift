@@ -6,16 +6,19 @@ public struct RegressionOutcome: Sendable {
     public let verdict: RegressionVerdict
     public let baseline: RawRun
     public let baselineScore: Double?
-    public let reDriven: RawRun
-    /// `nil` when the re-driven output was unscorable (the gate then reads
-    /// `.indeterminate`); recorded for the report regardless.
+    /// `nil` when the re-drive was never run — i.e. the baseline was unscorable so
+    /// the runner short-circuited before driving the second leg. A non-nil value is
+    /// a re-drive that actually happened.
+    public let reDriven: RawRun?
+    /// `nil` when the re-drive did not run, or ran but produced unscorable output
+    /// (the gate then reads `.indeterminate`). Recorded for the report regardless.
     public let reDrivenScore: Double?
 
     public init(
         verdict: RegressionVerdict,
         baseline: RawRun,
         baselineScore: Double?,
-        reDriven: RawRun,
+        reDriven: RawRun?,
         reDrivenScore: Double?
     ) {
         self.verdict = verdict
@@ -62,12 +65,12 @@ public enum RegressionRunner {
         // meaningful delta, so short-circuit to .indeterminate WITHOUT driving the
         // re-drive — re-driving a model we can't even baseline wastes a backend run.
         guard let baselineScore = try scorer.score(baseline.output) else {
-            // Still capture nothing further; surface the baseline for the report.
+            // The re-drive never ran — reDriven is nil, not an alias of the baseline.
             return RegressionOutcome(
                 verdict: .indeterminate(reason: "scorer returned nil for the baseline output"),
                 baseline: baseline,
                 baselineScore: nil,
-                reDriven: baseline,
+                reDriven: nil,
                 reDrivenScore: nil
             )
         }

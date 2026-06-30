@@ -44,8 +44,8 @@ respective backend's repo/process.
 | **P1** | Collator + cross-runtime matrix (this scaffold) |
 | **P2** | Differential comparator + same-bytes Cohort A + determinism pinning (verified feasible 2026-06-29) |
 | **P3** | BFCL-full + IFEval + MTEB lanes |
-| **P4** | `RecordReDriver` + replay-regression gate (lockstep with manifold-llama) |
-| **P5** | `core-bump.yml` lockstep + nightly cadence + rot-guard |
+| **P4** | `regress` subcommand — replay-regression gate over same-model cross-quant runs (`RegressionRunner`/`RegressionGate`) |
+| **P5** | `core-bump.yml` lockstep + on-demand cadence (nightly + rot-guard deferred) |
 
 ## Build & test
 

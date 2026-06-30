@@ -93,9 +93,6 @@ enum RegressCommand {
         guard backend == "ollama" || backend == "llama" else {
             die("--backend must be ollama|llama, got '\(backend)'", 2)
         }
-        if backend == "llama" && llamaRunner == nil {
-            die("--backend llama requires --llama-runner <command>", 2)
-        }
 
         let scorer: any RegressionScorer
         switch scorerKind {
@@ -107,25 +104,16 @@ enum RegressCommand {
             die("--scorer must be exact|contains, got '\(scorerKind)'", 2)
         }
 
-        // --- Resolve prompt bytes (the same-bytes anchor shared by both legs) ---
         let promptFileURL = URL(fileURLWithPath: promptFile)
-        let prompt: String
-        do {
-            // Keep prompt files BOM-free: String(contentsOf:) strips a leading BOM,
-            // which would desync the hashed bytes from what the llama runner reads
-            // off the raw file (a false prompt mismatch). Same note as DiffCommand.
-            prompt = try String(contentsOf: promptFileURL, encoding: .utf8)
-        } catch {
-            die("cannot read --prompt-file '\(promptFile)': \(error)", 1)
-        }
-
         let sampler = SamplerConfig(temperature: temperature, seed: seed, maxTokens: maxTokens)
         let gate = RegressionGate(threshold: threshold)
 
         // --- Build the two capture thunks for the chosen backend ---
         // Both legs use the SAME prompt + SAME sampler, so the only variable is the
-        // model/quant — which is the whole point. Same prompt → same promptSha256,
-        // so the gate's same-bytes invariant holds within a backend.
+        // model/quant — which is the whole point. Both legs of a backend share one
+        // prompt-hashing path (the Ollama driver hashes the prompt string; the llama
+        // runner hashes its own file bytes), so the gate's same-bytes invariant holds
+        // within a backend regardless of BOM.
         let captureBaseline: () async throws -> RawRun
         let captureReDriven: () async throws -> RawRun
 
@@ -133,6 +121,15 @@ enum RegressCommand {
         case "ollama":
             guard let ollamaURL = URL(string: ollamaURLString), ollamaURL.scheme != nil else {
                 die("--ollama-url is not a valid URL: '\(ollamaURLString)'", 2)
+            }
+            // Ollama hashes the prompt STRING, so the string is read here. Keep prompt
+            // files BOM-free — String(contentsOf:) strips a leading BOM (harmless here
+            // since both legs share this path, but it would desync a cross-backend run).
+            let prompt: String
+            do {
+                prompt = try String(contentsOf: promptFileURL, encoding: .utf8)
+            } catch {
+                die("cannot read --prompt-file '\(promptFile)': \(error)", 1)
             }
             var toolingVersions: [String: String] = [:]
             do {
@@ -147,8 +144,12 @@ enum RegressCommand {
             captureBaseline = { try await driver.run(model: baselineModel, prompt: prompt, sampler: sampler, repeatIndex: 0) }
             captureReDriven = { try await driver.run(model: reDrivenModel, prompt: prompt, sampler: sampler, repeatIndex: 0) }
         case "llama":
-            // llamaRunner non-nil checked above.
-            let driver = LlamaRunnerDriver(command: llamaRunner!)
+            guard let llamaRunner else {
+                die("--backend llama requires --llama-runner <command>", 2)
+            }
+            // The runner reads the prompt FILE itself and hashes its raw bytes, so no
+            // string is read here.
+            let driver = LlamaRunnerDriver(command: llamaRunner)
             captureBaseline = { try await driver.run(modelArg: baselineModel, promptFile: promptFileURL, sampler: sampler, repeatIndex: 0) }
             captureReDriven = { try await driver.run(modelArg: reDrivenModel, promptFile: promptFileURL, sampler: sampler, repeatIndex: 0) }
         default:

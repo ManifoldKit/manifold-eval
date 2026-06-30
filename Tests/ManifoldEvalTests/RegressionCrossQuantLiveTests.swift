@@ -45,6 +45,26 @@ final class RegressionCrossQuantLiveTests: XCTestCase {
         return url
     }
 
+    /// The model tags Ollama has pulled, via `/api/tags`. Used to pre-flight so a
+    /// missing quant tag is a clean XCTSkip (with a `ollama pull` hint), not a raw
+    /// 404 surfaced as a test failure.
+    private func installedModels(_ url: URL) async throws -> Set<String> {
+        struct Tags: Decodable { struct M: Decodable { let name: String }; let models: [M] }
+        let (data, _) = try await URLSession.shared.data(from: url.appendingPathComponent("api/tags"))
+        return Set(try JSONDecoder().decode(Tags.self, from: data).models.map(\.name))
+    }
+
+    /// Skip unless every `tags` model is installed.
+    private func skipUnlessInstalled(_ tags: [String], at url: URL) async throws {
+        let installed = try await installedModels(url)
+        let missing = tags.filter { !installed.contains($0) }
+        if !missing.isEmpty {
+            throw XCTSkip("missing Ollama model(s): \(missing.joined(separator: ", ")). "
+                + "Pull them (e.g. `ollama pull \(missing[0])`) or set REGRESS_BASELINE_MODEL/"
+                + "REGRESS_REDRIVEN_MODEL to two quant tags you have.")
+        }
+    }
+
     private var baselineQuant: String { env("REGRESS_BASELINE_MODEL", "qwen2.5:0.5b-instruct-q8_0") }
     private var reDrivenQuant: String { env("REGRESS_REDRIVEN_MODEL", "qwen2.5:0.5b-instruct-q4_K_M") }
     private var prompt: String { env("REGRESS_PROMPT", "2 + 2 =") }
@@ -54,7 +74,9 @@ final class RegressionCrossQuantLiveTests: XCTestCase {
 
     func testSameQuantReDriveIsStable() async throws {
         try XCTSkipUnless(isEnabled, "set RUN_OLLAMA_LIVE=1 to run live cross-quant tests")
-        let driver = OllamaRawDriver(baseURL: try ollamaURL(), coreCommit: "live-crossquant")
+        let url = try ollamaURL()
+        try await skipUnlessInstalled([baselineQuant], at: url)
+        let driver = OllamaRawDriver(baseURL: url, coreCommit: "live-crossquant")
         let scorer = SubstringRegressionScorer(expected: expected)
 
         let outcome = try await RegressionRunner.run(
@@ -69,7 +91,7 @@ final class RegressionCrossQuantLiveTests: XCTestCase {
             outcome.verdict, .stable,
             "re-driving the SAME quant at temp=0 must not trip the gate. "
                 + "baseline=\(fmt(outcome.baselineScore)) reDriven=\(fmt(outcome.reDrivenScore)) "
-                + "out='\(outcome.reDriven.output.prefix(60))'"
+                + "out='\(outcome.reDriven?.output.prefix(60) ?? "<none>")'"
         )
     }
 
@@ -77,7 +99,9 @@ final class RegressionCrossQuantLiveTests: XCTestCase {
 
     func testCrossQuantVerdictTracksScores() async throws {
         try XCTSkipUnless(isEnabled, "set RUN_OLLAMA_LIVE=1 to run live cross-quant tests")
-        let driver = OllamaRawDriver(baseURL: try ollamaURL(), coreCommit: "live-crossquant")
+        let url = try ollamaURL()
+        try await skipUnlessInstalled([baselineQuant, reDrivenQuant], at: url)
+        let driver = OllamaRawDriver(baseURL: url, coreCommit: "live-crossquant")
         let scorer = SubstringRegressionScorer(expected: expected)
         let gate = RegressionGate(threshold: 0.05)
 
@@ -93,7 +117,11 @@ final class RegressionCrossQuantLiveTests: XCTestCase {
         // must yield a trustworthy verdict, NOT .indeterminate.
         let baselineScore = try XCTUnwrap(outcome.baselineScore)
         let reDrivenScore = try XCTUnwrap(outcome.reDrivenScore)
-        let diverged = abs(reDrivenScore - baselineScore) > gate.threshold
+        // `diverged` is derived from the SCORES ALONE, independent of the gate's own
+        // threshold — that independence is what lets the assertions below catch a
+        // broken gate. The scorer is binary (0.0/1.0), so a genuine quant difference
+        // is an exact inequality, far outside any sane threshold.
+        let diverged = reDrivenScore != baselineScore
 
         // Human-in-loop signal: report what actually happened across the two quants.
         print("[cross-quant] \(baselineQuant)=\(baselineScore) vs \(reDrivenQuant)=\(reDrivenScore) "
@@ -101,11 +129,16 @@ final class RegressionCrossQuantLiveTests: XCTestCase {
 
         switch outcome.verdict {
         case .moved(let delta):
-            // sabotage: widen threshold to 1.0 → identical-scoring quants would read .stable
-            XCTAssertTrue(diverged, "gate said .moved but scores agree within threshold")
+            // sabotage: invert the gate's `abs(delta) <= threshold` test (so it reports
+            // .moved when scores AGREE) → on a non-divergent quant pair this fires and
+            // XCTAssertTrue(diverged) fails. `diverged` does not move with the gate.
+            XCTAssertTrue(diverged, "gate said .moved but the two quants scored identically")
             XCTAssertEqual(delta, reDrivenScore - baselineScore, accuracy: 1e-9)
         case .stable:
-            XCTAssertFalse(diverged, "gate said .stable but scores diverged beyond threshold")
+            // sabotage: force the gate to always return .moved → on a divergent pair
+            // this branch is never taken, but on an identical-scoring pair a broken
+            // always-.moved gate skips here and fails the .moved branch above.
+            XCTAssertFalse(diverged, "gate said .stable but the two quants scored differently")
         case .indeterminate(let reason):
             XCTFail("cross-quant run must produce a trustworthy verdict, got .indeterminate: \(reason)")
         }

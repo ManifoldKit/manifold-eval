@@ -6,12 +6,21 @@
 
 ---
 
+> **Update 2026-06-30 — moat now wired.** This document records the original
+> gate-logic verification on a *two-different-models* proxy. The replay-regression
+> moat is now a live product feature: the `manifold-eval regress` subcommand drives
+> `RegressionRunner` → `RegressionGate` → `RegressionReport`, the inert
+> `RecordReDriver` protocol was deleted (the gate needs only a `RawRun` producer),
+> and a genuine **same-model Q8-vs-Q4 cross-quant** verification lives in
+> `RegressionCrossQuantLiveTests`. The "What this does NOT prove" section below has
+> been updated accordingly.
+
 ## What was run
 
 Two live Ollama model calls via `OllamaRawDriver` (`raw: true`, `temperature: 0`,
-`repeatPenalty: 1.0`) on the prompt `"2 + 2 ="`. The `RecordReDriver` seam is bypassed
-intentionally — `OllamaRawDriver` outputs are fed directly to `RegressionGate.check`, which
-is the correct proof that the gate logic works independent of the re-driver plumbing.
+`repeatPenalty: 1.0`) on the prompt `"2 + 2 ="`. The `OllamaRawDriver` outputs are fed
+directly to `RegressionGate.check` — the correct proof that the gate logic works
+independent of how each `RawRun` is produced.
 
 Scorer: `ContainsRegressionScorer(expected: "4")` — returns `1.0` if the output contains
 the string `"4"`, else `0.0`. Binary scoring makes threshold-boundary false verdicts
@@ -74,23 +83,28 @@ using the same deterministic model for both legs guarantees identical scores.
 
 ---
 
-## What this does NOT prove
+## What this (proxy) run does NOT prove — and where it's now covered
 
-- **True byte-deterministic cross-quant re-drive.** `RecordReDriver` is intentionally stubbed.
-  No production `RecordReDriver` implementation exists. Wiring requires:
-  1. Extracting `Replayer.runOnce` from ManifoldFuzz as an injectable function.
-  2. Fixing config-lossy plumbing (`repeatPenalty`, `seed`, `topK` not threaded through).
-  3. A manifold-llama lockstep PR exposing the re-drive entry point.
-  See `Sources/ManifoldEval/Replay/RecordReDriver.swift` for the full unblocking checklist.
+- **Same-model cross-quant parity.** This run used two *different models* (`llama3.1-8b`
+  and `gemma3-4b`) as a proxy, so it proves the gate's verdict logic is model/quant-agnostic
+  but not that it tracks a real re-quant. **Now covered** by `RegressionCrossQuantLiveTests`,
+  which drives two quant tags of the *same* model (e.g. `…q8_0` vs `…q4_K_M`) through the real
+  `RegressionRunner`/`OllamaRawDriver` path and asserts the verdict tracks the observed scores.
+  Run it with `RUN_OLLAMA_LIVE=1 swift test --filter RegressionCrossQuantLiveTests` against two
+  quant tags you have pulled. **The cross-quant credibility VERDICT (did the quants actually
+  diverge, and is that drift or a genuine regression?) is the human-in-loop step** — the gate
+  surfaces movement; it does not adjudicate it.
 
-- **Cross-quant parity.** No two quants of the same model were available in Ollama. Two
-  different models (`llama3.1-8b` and `gemma3-4b`) served as a proxy for the cross-quant
-  scenario. The gate logic is model/quant-agnostic — the proof of gate-logic correctness
-  is sound regardless of the source of the score difference.
+- **Byte-deterministic in-core re-drive.** The eval moat re-drives via the separate-process
+  backend path (the once-per-process `llama_backend_init` rule forbids linking llama in this
+  repo), so it does not exercise — nor need — the in-core `Replayer.runOnce` path. That path
+  has its own genuine defects (it never seeds generation, hardcodes `repeatPenalty: 1.1`, and
+  `ConfigSnapshot` carries no `topK`), tracked as the decoupled **P4-aux** `fix(fuzz):` work in
+  ManifoldKit — independent of this moat.
 
-- **Production scorer quality.** `ContainsRegressionScorer` is a verification-only binary
-  scorer. A production deployment would use a calibrated scorer (exact-match, AST-match,
-  IFEval verifier, etc.) tuned to the evaluation task.
+- **Production scorer quality.** The verification scorers (`SubstringRegressionScorer`,
+  `ExactMatchRegressionScorer`) are deterministic binary scorers. A production deployment would
+  use a calibrated scorer (AST-match, IFEval verifier, semantic similarity) tuned to the task.
 
 ---
 

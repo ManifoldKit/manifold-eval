@@ -2,9 +2,12 @@ import XCTest
 @testable import ManifoldEval
 
 /// Live integration test that verifies ``RegressionGate`` detects real score
-/// movement using actual Ollama model outputs — bypassing the stubbed
-/// ``RecordReDriver`` seam by feeding ``OllamaRawDriver`` outputs directly to
-/// the gate.
+/// movement using actual Ollama model outputs, fed directly to the gate via
+/// ``OllamaRawDriver`` (the same producer path ``RegressionRunner`` uses).
+///
+/// This proves the gate logic on a *different-models* pair (a strong, guaranteed
+/// score difference). The genuine same-model **cross-quant** verification lives in
+/// `RegressionCrossQuantLiveTests`.
 ///
 /// **Env-gated** (`RUN_OLLAMA_LIVE=1`): CI has no Ollama, so these skip there.
 /// Run locally with:
@@ -26,16 +29,10 @@ import XCTest
 ///
 /// ## What this does NOT prove
 ///
-/// - True byte-deterministic cross-quant re-drive: ``RecordReDriver`` is still
-///   stubbed. These tests feed ``RawRun``s from ``OllamaRawDriver`` directly,
-///   bypassing the ``RecordReDriver`` seam intentionally. A production
-///   implementation requires the `Replayer.runOnce` extraction from ManifoldFuzz
-///   — deferred; see ``RecordReDriver`` for the full unblocking checklist.
-///
-/// - Cross-quant parity: no two quants of the same model were used here.
-///   Two different models serve as a proxy. The gate logic is model/quant-agnostic
-///   — the proof holds regardless of whether the score difference arose from
-///   a quant change or a model swap.
+/// - Cross-quant parity: this test uses two *different models* as a proxy, so it
+///   proves the gate's verdict logic is model/quant-agnostic but not that it tracks
+///   a real re-quant. The same-model Q8-vs-Q4 cross-quant case is covered by
+///   `RegressionCrossQuantLiveTests`.
 ///
 /// See `docs/P4-VERIFICATION.md` for the full run record and analysis.
 final class RegressionGateLiveTests: XCTestCase {

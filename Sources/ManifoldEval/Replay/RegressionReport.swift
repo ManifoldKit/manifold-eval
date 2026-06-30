@@ -19,7 +19,12 @@ public enum RegressionReport {
         out += "\n> \(verdictGloss(outcome.verdict))\n\n"
 
         out += renderLeg("Baseline", run: outcome.baseline, score: outcome.baselineScore)
-        out += renderLeg("Re-driven", run: outcome.reDriven, score: outcome.reDrivenScore)
+        if let reDriven = outcome.reDriven {
+            out += renderLeg("Re-driven", run: reDriven, score: outcome.reDrivenScore)
+        } else {
+            out += "## Re-driven\n\n_Re-drive skipped — the baseline was unscorable, so the "
+                + "second leg was never run._\n\n"
+        }
 
         return out
     }
