@@ -57,8 +57,9 @@ public enum STSBCorpusFetcher {
     public static func fetch(cacheFile: URL) async throws -> [STSPair] {
         // Fast path: load from cache without any network contact.
         if FileManager.default.fileExists(atPath: cacheFile.path) {
-            let cached = try MTEBLane.loadPairs(from: cacheFile)
-            if let cached, !cached.isEmpty {
+            // try? is intentional here: a corrupt/empty cache should fall through to a
+            // re-download, NOT propagate a decode error — the re-download IS the recovery.
+            if let cached = try? MTEBLane.loadPairs(from: cacheFile), !cached.isEmpty {
                 return cached
             }
             // File exists but is empty/corrupt — fall through to re-download.
