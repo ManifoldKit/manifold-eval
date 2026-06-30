@@ -1,7 +1,7 @@
 # P4 Replay-Regression Gate — Real-Model Verification
 
 **Date:** 2026-06-30  
-**Branch:** `feat/p4-replay-gate-draft` (draft PR #3 — do not merge without human sign-off)  
+**Branch:** `feat/p4-replay-gate-draft` (draft PR #8 — do not merge without human sign-off)  
 **Ran on:** Apple Silicon, macOS 26, Ollama 0.30.x, localhost:11434
 
 ---
