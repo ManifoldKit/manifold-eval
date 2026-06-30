@@ -108,7 +108,57 @@ using the same deterministic model for both legs guarantees identical scores.
 
 ---
 
-## How to reproduce
+---
+
+## Cross-quant verification (same-model Q8 vs Q4) — PASSED 2026-06-30
+
+The genuine moat check the proxy run above could not provide: **two quantisations of
+the SAME model** (`qwen2.5:0.5b-instruct-q8_0` vs `-q4_K_M`, pulled from Ollama), greedy
+`temp=0`, via the `regress` subcommand. Quant is the only variable.
+
+`RegressionCrossQuantLiveTests` (both tests **PASSED**): same-quant re-drive → `.stable`
+(no false positive); the cross-quant verdict tracked the observed scores and was never
+`.indeterminate`.
+
+Survey across 15 probes (`regress --scorer contains`): the quants **agreed** on simple
+facts/arithmetic (capital of Australia, atomic number of carbon, 23×19) → `.stable`, and
+**diverged** on harder recall → `.moved`. The headline case — a real correctness loss from
+re-quantising:
+
+| Probe | q8_0 | q4_K_M | Verdict |
+|-------|------|--------|---------|
+| "The largest moon of Saturn is" (expect `Titan`) | **Titan** ✓ (1.0) | "Rhea … the answer is Saturn" ✗ (0.0) | **`.moved(delta -1.0)`** |
+| "The capital of Kazakhstan is" (expect `Astana`) | ✗ (0.0) | ✓ (1.0) | `.moved(+1.0)` |
+| "The largest moon of Saturn is" | — | — | exit code **1** |
+
+The `REGRESSION.md` the gate emitted for the Titan case (note the built-in caveat):
+
+```
+## Verdict
+- verdict: **moved (delta -1.0000)**
+> Score moved by -1.0000 beyond threshold. **Movement is not automatically a
+> regression** — a re-quant can legitimately shift output. This flags the cell
+> for a human to judge quant drift vs genuine correctness loss.
+
+## Baseline  (q8_0, score 1.0000)
+- output: ` … it is called Titan. Titan is a moon of Saturn …`
+## Re-driven (q4_K_M, score 0.0000)
+- output: ` … the largest moon of Saturn is Rhea. … Therefore, the answer is Saturn.`
+```
+
+**Credibility verdict: PASSED.** On real same-model cross-quant runs the gate (a) detects a
+genuine correctness regression a re-quant introduced, (b) holds `.stable` where the quants
+agree, (c) faithfully tracks the scores, and (d) emits a deterministic, human-readable report
+that surfaces — not adjudicates — the movement. The moat does what it claims.
+
+Reproduce: `ollama pull qwen2.5:0.5b-instruct-q8_0 qwen2.5:0.5b-instruct-q4_K_M`, then
+`RUN_OLLAMA_LIVE=1 swift test --filter RegressionCrossQuantLiveTests`, or drive any probe via
+`manifold-eval regress --backend ollama --baseline-model …q8_0 --redriven-model …q4_K_M
+--prompt-file P --expected REF`.
+
+---
+
+## How to reproduce (original proxy run)
 
 ```bash
 # Requires Ollama at localhost:11434 with llama3.1-8b:latest and gemma3-4b:latest pulled.
