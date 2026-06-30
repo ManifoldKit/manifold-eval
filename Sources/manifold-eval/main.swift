@@ -11,6 +11,8 @@ import ManifoldTools
 //   manifold-eval ifeval  --corpus <path> --responses <jsonl> [--out PATH]
 //   manifold-eval bfcl    --corpus <dir>  --responses <jsonl> [--out PATH]
 //   manifold-eval mteb    --dataset <path-or-fixture> [--ollama-model <tag>] [--out PATH]
+//   manifold-eval regress --backend ollama|llama --baseline-model M --redriven-model M
+//                         --prompt-file P --expected REF [options…]
 
 func die(_ message: String, code: Int32) -> Never {
     FileHandle.standardError.write(Data("error: \(message)\n".utf8))
@@ -33,6 +35,10 @@ guard let subcommand = arguments.first else {
     print("  manifold-eval ifeval --corpus <path> --responses <jsonl> [--out PATH]")
     print("  manifold-eval bfcl   --corpus <dir>  --responses <jsonl> [--out PATH]")
     print("  manifold-eval mteb   --dataset <path-or-fixture> [--ollama-model nomic-embed-text] [--out PATH]")
+    print("  manifold-eval regress --backend ollama|llama --baseline-model M --redriven-model M")
+    print("                     --prompt-file P --expected REF [--scorer contains|exact] [--ignore-case]")
+    print("                     [--threshold D] [--seed N] [--max-tokens N] [--temperature D]")
+    print("                     [--llama-runner CMD] [--ollama-url URL] [--core-commit SHA] [--out REGRESSION.md]")
     exit(2)
 }
 
@@ -116,6 +122,11 @@ case "bfcl":
 case "mteb":
     await MTEBCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
+case "regress":
+    // The replay-regression moat entry point (plan §8). Orchestration lives in
+    // RegressCommand; the gate/runner/report it drives live in ManifoldEval/Replay.
+    await RegressCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+
 default:
-    die("unknown subcommand '\(subcommand)' (expected: collate, diff, ifeval, bfcl, mteb)", code: 2)
+    die("unknown subcommand '\(subcommand)' (expected: collate, diff, ifeval, bfcl, mteb, regress)", code: 2)
 }
