@@ -7,7 +7,9 @@ adversarial verdicts on model × quant × backend × renderer behavior. The repo
 governance boundary between implementation and assurance (the pattern used by `test262`,
 `web-platform-tests`, the Khronos Vulkan CTS, SQLite TH3).
 
-Design and phasing live in ManifoldKit `docs/plans/manifold-eval-repo-v2-override.md`.
+Design and phasing live in ManifoldKit `docs/plans/manifold-eval-repo-v2-override.md`. For *why*
+this repo exists — the decision history behind the implementation/assurance split — see
+[docs/ORIGINS.md](docs/ORIGINS.md).
 
 ## Architecture
 
