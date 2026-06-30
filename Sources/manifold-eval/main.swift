@@ -3,13 +3,14 @@ import ManifoldEval
 import ManifoldTools
 
 // Minimal hand-rolled argv parsing keeps the dependency surface to ManifoldKit
-// alone (no ArgumentParser). One subcommand today: `collate`.
+// alone (no ArgumentParser). Subcommands:
 //
 //   manifold-eval collate <record.json>... [--out PATH] [--title T]
-//
-// Reads each file as a [ConformanceRecord] JSON array (the shape every eval leg
-// emits via `manifold-tools score --emit-records`), collates them with the
-// comparability guard, and renders the cross-runtime matrix to stdout or --out.
+//   manifold-eval diff    --model <tag> (--prompt-file P | --messages-file M --template-gguf G)
+//                         [options…]
+//   manifold-eval ifeval  --corpus <path> --responses <jsonl> [--out PATH]
+//   manifold-eval bfcl    --corpus <dir>  --responses <jsonl> [--out PATH]
+//   manifold-eval mteb    --dataset <path-or-fixture> [--ollama-model <tag>] [--out PATH]
 
 func die(_ message: String, code: Int32) -> Never {
     FileHandle.standardError.write(Data("error: \(message)\n".utf8))
@@ -29,6 +30,9 @@ guard let subcommand = arguments.first else {
     print("                     [--max-tokens N] [--temperature D] [--bos ID]")
     print("                     [--cohort sameWeights|sameFamily|cloud] [--ollama-url URL]")
     print("                     [--core-commit SHA] [--out DIVERGENCE.md]")
+    print("  manifold-eval ifeval --corpus <path> --responses <jsonl> [--out PATH]")
+    print("  manifold-eval bfcl   --corpus <dir>  --responses <jsonl> [--out PATH]")
+    print("  manifold-eval mteb   --dataset <path-or-fixture> [--ollama-model nomic-embed-text] [--out PATH]")
     exit(2)
 }
 
@@ -103,6 +107,15 @@ case "diff":
     // orchestration lives in DiffCommand to keep this dispatch readable.
     await DiffCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
+case "ifeval":
+    IFEvalCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+
+case "bfcl":
+    await BFCLCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+
+case "mteb":
+    await MTEBCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+
 default:
-    die("unknown subcommand '\(subcommand)' (expected: collate, diff)", code: 2)
+    die("unknown subcommand '\(subcommand)' (expected: collate, diff, ifeval, bfcl, mteb)", code: 2)
 }
