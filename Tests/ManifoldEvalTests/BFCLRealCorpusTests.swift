@@ -34,15 +34,19 @@ import ManifoldTools
 final class BFCLRealCorpusTests: XCTestCase {
 
     // MARK: - Gorilla v4 expected case counts (verified against live data)
-
+    //
+    // Counts verified by running the real corpus via BFCLCorpusFetcher on
+    // 2026-06-30. `wc -l` under-counts by 1 per file because the JSONL files
+    // have no trailing newline; Swift's line-splitting correctly includes the
+    // final record.
     private enum GorillaV4 {
-        static let simpleCases            = 399
-        static let multipleCases          = 199
-        static let parallelCases          = 199
-        static let parallelMultipleCases  = 199
-        static let irrelevanceCases       = 239
+        static let simpleCases            = 400
+        static let multipleCases          = 200
+        static let parallelCases          = 200
+        static let parallelMultipleCases  = 200
+        static let irrelevanceCases       = 240
         static let totalCases             = simpleCases + multipleCases + parallelCases
-                                            + parallelMultipleCases + irrelevanceCases // 1235
+                                            + parallelMultipleCases + irrelevanceCases // 1240
     }
 
     // MARK: - Test helpers
