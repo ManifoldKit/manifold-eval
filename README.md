@@ -278,7 +278,7 @@ Sources/
 | **P2** | Differential comparator + same-bytes Cohort A + determinism pinning | ✅ shipped |
 | **P3** | BFCL-full + IFEval + MTEB lanes | ✅ shipped |
 | **P4** | `regress` — replay-regression gate over same-model cross-quant runs | ✅ shipped & verified |
-| **P5** | `core-bump.yml` lockstep + on-demand cadence (nightly + rot-guard deferred) | planned |
+| **P5** | `core-bump.yml` lockstep automation | ✅ shipped (`workflow_dispatch`-driven until the org dispatch PAT is re-scoped; rot-guard/nightly cadence still deferred) |
 
 Design and phasing live in ManifoldKit's `docs/plans/manifold-eval-repo-v2-override.md`.
 
