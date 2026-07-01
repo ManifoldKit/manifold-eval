@@ -9,6 +9,8 @@ import ManifoldTools
 //   manifold-eval diff    --model <tag> (--prompt-file P | --messages-file M --template-gguf G)
 //                         [options…]
 //   manifold-eval ifeval  --corpus <path> --responses <jsonl> [--out PATH]
+//   manifold-eval ifeval-generate --ollama-model <tag> --corpus <path> --out <responses.jsonl>
+//                         [--ollama-url URL] [--max-tokens N] [--concurrency N] [--timeout SECONDS]
 //   manifold-eval bfcl    (--corpus <dir> | --gorilla-cache-dir <dir>) --responses <jsonl> [--out PATH]
 //   manifold-eval bfcl-generate --ollama-model <tag> [--category simple|multiple|parallel|parallel_multiple|irrelevance|all]
 //                         [--ollama-url URL] [--cache-dir DIR] --out <responses.jsonl> [--timeout SECONDS]
@@ -35,6 +37,8 @@ guard let subcommand = arguments.first else {
     print("                     [--cohort sameWeights|sameFamily|cloud] [--ollama-url URL]")
     print("                     [--core-commit SHA] [--out DIVERGENCE.md]")
     print("  manifold-eval ifeval --corpus <path> --responses <jsonl> [--out PATH]")
+    print("  manifold-eval ifeval-generate --ollama-model <tag> --corpus <path> --out <responses.jsonl>")
+    print("                     [--ollama-url URL] [--max-tokens N] [--concurrency N] [--timeout SECONDS]")
     print("  manifold-eval bfcl   (--corpus <dir> | --gorilla-cache-dir <dir>) --responses <jsonl> [--out PATH]")
     print("  manifold-eval bfcl-generate --ollama-model <tag> [--category simple|multiple|parallel|parallel_multiple|irrelevance|all]")
     print("                     [--ollama-url URL] [--cache-dir DIR] --out <responses.jsonl> [--timeout SECONDS]")
@@ -120,6 +124,9 @@ case "diff":
 case "ifeval":
     IFEvalCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
+case "ifeval-generate":
+    await IFEvalGenerateCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+
 case "bfcl":
     await BFCLCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
@@ -138,5 +145,5 @@ case "regress":
     await RegressCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
 default:
-    die("unknown subcommand '\(subcommand)' (expected: collate, diff, ifeval, bfcl, bfcl-generate, mteb, regress)", code: 2)
+    die("unknown subcommand '\(subcommand)' (expected: collate, diff, ifeval, ifeval-generate, bfcl, bfcl-generate, mteb, regress)", code: 2)
 }
