@@ -73,14 +73,20 @@ anywhere. You generate responses elsewhere (any backend), dump them to JSONL, an
 swift run manifold-eval ifeval --corpus ifeval.jsonl --responses responses.jsonl --out IFEVAL.md
 #   responses line: {"key":"<case-key>","response":"<model output>"}
 
-# BFCL — tool-call accuracy via ManifoldTools' AST matcher
+# BFCL — tool-call accuracy via ManifoldTools' AST matcher (flat fixture layout)
 swift run manifold-eval bfcl --corpus path/to/bfcl/data --responses calls.jsonl --out BFCL.md
 #   calls line: {"id":"<case-id>","calls":[{"id":"...","toolName":"...","arguments":"..."}]}
+
+# BFCL — same corpus a `bfcl-generate` run used (Gorilla v4 cache layout)
+swift run manifold-eval bfcl --gorilla-cache-dir ~/.cache/manifold-eval/bfcl --responses calls.jsonl --out BFCL.md
 ```
 
-Cases missing from the responses file are scored as empty (for BFCL, the `irrelevance` category
-passes on an empty call list; every other category counts as a miss). With `--out`, a one-line
-accuracy summary also prints to stdout.
+`--corpus <dir>` expects the flat `<category>_questions.jsonl` / `<category>_answers.jsonl` layout
+(fixtures, or a hand-reshaped corpus). `--gorilla-cache-dir <dir>` is the alternative for a Gorilla v4
+cache directory as `bfcl-generate --cache-dir` (or `scripts/fetch-corpora.sh`) produces it — pass
+exactly one of the two. Cases missing from the responses file are scored as empty (for BFCL, the
+`irrelevance` category passes on an empty call list; every other category counts as a miss). With
+`--out`, a one-line accuracy summary also prints to stdout.
 
 ### `bfcl-generate`
 
@@ -98,8 +104,9 @@ swift run manifold-eval bfcl-generate --ollama-model mistral:7b-instruct-tools-q
 #   --cache-dir:  Gorilla v4 download/cache dir (default ~/.cache/manifold-eval/bfcl)
 #   --timeout:    per-case generation deadline in seconds (default 120)
 
-# Then score exactly what was generated:
-swift run manifold-eval bfcl --corpus ~/.cache/manifold-eval/bfcl/data \
+# Then score exactly what was generated — note --gorilla-cache-dir, not --corpus
+# (the Gorilla cache layout differs from the flat fixture layout `--corpus` expects):
+swift run manifold-eval bfcl --gorilla-cache-dir ~/.cache/manifold-eval/bfcl \
     --responses multiple-responses.jsonl --out BFCL.md
 ```
 
@@ -111,6 +118,11 @@ bundled-slice generation against the full 199-case `multiple` corpus; the honest
 recorded, never dispatched/executed. Progress streams to stderr per-case, and each response is
 written to `--out` as soon as it's generated, so a multi-hour full-corpus run banks progress
 incrementally instead of risking it all on one process that runs to completion.
+
+Scoring a `bfcl-generate --category multiple` run reports the `multiple` row honestly (every case in
+that category was attempted), but categories you didn't generate still show up at their (correct)
+0% — read the per-category table, not just the misleading "Overall" aggregate, when your responses
+file doesn't cover every category.
 
 ### `mteb`
 

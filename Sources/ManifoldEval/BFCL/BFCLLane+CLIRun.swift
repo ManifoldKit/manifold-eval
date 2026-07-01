@@ -58,11 +58,16 @@ public extension BFCLLane {
 
     // MARK: - End-to-end CLI run
 
-    /// Loads pre-computed tool-call responses from disk and runs the BFCL lane.
+    /// Loads pre-computed tool-call responses from disk and runs the BFCL lane
+    /// against `corpusSource`.
     ///
     /// Cases whose ID does not appear in `responsesURL` are emitted with an empty
     /// call list — irrelevance cases pass; all other categories count as failed.
-    func cliRun(corpusDir: URL, responsesURL: URL) async throws -> (result: LaneResult, markdown: String) {
+    ///
+    /// This is the general form: pass `.gorilla(cacheDir:)` to score a
+    /// `bfcl-generate` full-corpus run against the same Gorilla cache it was
+    /// generated from (same loader, same ids — see ``loadCases(category:source:)``).
+    func cliRun(corpusSource: CorpusSource, responsesURL: URL) async throws -> (result: LaneResult, markdown: String) {
         let entries = try BFCLLane.loadResponses(from: responsesURL)
         let responsesByID = Dictionary(
             entries.map { ($0.id, $0.calls) },
@@ -70,11 +75,19 @@ public extension BFCLLane {
         )
 
         let result = await run(
-            corpusSource: .localDirectory(corpusDir),
+            corpusSource: corpusSource,
             emit: { @Sendable testCase in responsesByID[testCase.id] ?? [] }
         )
 
         return (result, BFCLLane.renderMarkdown(result: result))
+    }
+
+    /// Convenience overload for the flat `<category>_questions.jsonl` /
+    /// `<category>_answers.jsonl` local-directory layout (fixtures, or a
+    /// hand-reshaped corpus). Equivalent to
+    /// `cliRun(corpusSource: .localDirectory(corpusDir), responsesURL:)`.
+    func cliRun(corpusDir: URL, responsesURL: URL) async throws -> (result: LaneResult, markdown: String) {
+        try await cliRun(corpusSource: .localDirectory(corpusDir), responsesURL: responsesURL)
     }
 
     // MARK: - Markdown rendering

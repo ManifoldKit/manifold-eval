@@ -70,6 +70,13 @@ let package = Package(
                 // @testable import for DiffCommand's argv-parsing tests — no network I/O
                 // is exercised (parseArguments is pure), so this stays hermetic.
                 "manifold-eval",
+                // Only used by the RUN_OLLAMA_LIVE=1-gated BFCLGenerateLiveTests,
+                // which drives the real production tool-injection path
+                // (InferenceService + OllamaBackend + BFCLRunner) end-to-end —
+                // a stronger proof than a synthetic emit closure. Test-only; the
+                // ManifoldEval library itself stays backend-agnostic.
+                .product(name: "ManifoldOllama", package: "ManifoldKit"),
+                .product(name: "ManifoldTools", package: "ManifoldKit"),
             ],
             resources: [.copy("Fixtures")]
         ),

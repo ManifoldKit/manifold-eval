@@ -9,7 +9,7 @@ import ManifoldTools
 //   manifold-eval diff    --model <tag> (--prompt-file P | --messages-file M --template-gguf G)
 //                         [options…]
 //   manifold-eval ifeval  --corpus <path> --responses <jsonl> [--out PATH]
-//   manifold-eval bfcl    --corpus <dir>  --responses <jsonl> [--out PATH]
+//   manifold-eval bfcl    (--corpus <dir> | --gorilla-cache-dir <dir>) --responses <jsonl> [--out PATH]
 //   manifold-eval bfcl-generate --ollama-model <tag> [--category simple|multiple|parallel|parallel_multiple|irrelevance|all]
 //                         [--ollama-url URL] [--cache-dir DIR] --out <responses.jsonl> [--timeout SECONDS]
 //   manifold-eval mteb    --dataset <path-or-fixture> [--ollama-model <tag>] [--out PATH]
@@ -35,7 +35,7 @@ guard let subcommand = arguments.first else {
     print("                     [--cohort sameWeights|sameFamily|cloud] [--ollama-url URL]")
     print("                     [--core-commit SHA] [--out DIVERGENCE.md]")
     print("  manifold-eval ifeval --corpus <path> --responses <jsonl> [--out PATH]")
-    print("  manifold-eval bfcl   --corpus <dir>  --responses <jsonl> [--out PATH]")
+    print("  manifold-eval bfcl   (--corpus <dir> | --gorilla-cache-dir <dir>) --responses <jsonl> [--out PATH]")
     print("  manifold-eval bfcl-generate --ollama-model <tag> [--category simple|multiple|parallel|parallel_multiple|irrelevance|all]")
     print("                     [--ollama-url URL] [--cache-dir DIR] --out <responses.jsonl> [--timeout SECONDS]")
     print("  manifold-eval mteb   --dataset <path-or-fixture> [--ollama-model nomic-embed-text] [--out PATH]")
