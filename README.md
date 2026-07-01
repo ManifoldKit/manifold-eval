@@ -22,7 +22,7 @@ swift build
 swift test          # fixture-driven; no models, no network — hosted-CI safe
 ```
 
-The CLI is a single executable with seven subcommands. Run it with no arguments for usage:
+The CLI is a single executable with eight subcommands. Run it with no arguments for usage:
 
 ```sh
 swift run manifold-eval
@@ -37,6 +37,7 @@ in hosted CI — see [Running real eval lanes](#running-real-eval-lanes).
 |---------|--------------|:-------------:|
 | [`collate`](#collate) | Fold per-backend `ConformanceRecord` JSON into one cross-runtime matrix | no |
 | [`ifeval`](#ifeval--bfcl-offline-scorers) | Score pre-computed responses against the IFEval corpus | no |
+| [`ifeval-generate`](#ifeval-generate) | Drive a live Ollama model over an IFEval corpus and write the `ifeval` responses file | **yes** |
 | [`bfcl`](#ifeval--bfcl-offline-scorers) | Score pre-computed tool-calls against the BFCL (Gorilla v4) corpus | no |
 | [`bfcl-generate`](#bfcl-generate) | Drive a live Ollama model over the full BFCL corpus and write the `bfcl` responses file | **yes** |
 | [`mteb`](#mteb) | Run the MTEB-STS embedding-correlation lane against an Ollama model | **yes** |
@@ -124,6 +125,40 @@ that category was attempted), but categories you didn't generate still show up a
 0% — read the per-category table, not just the misleading "Overall" aggregate, when your responses
 file doesn't cover every category.
 
+### `ifeval-generate`
+
+The IFEval *generator* — the piece `ifeval` above doesn't have. Drives a live Ollama model over
+every case in an IFEval corpus and writes one `IFEvalResponseEntry` JSON object per line: the exact
+schema `ifeval --responses` reads, so a generate → score round-trip needs no adapter.
+
+```sh
+swift run manifold-eval ifeval-generate --ollama-model qwen2.5-0.5b \
+    --corpus ifeval.jsonl --out responses.jsonl
+#   --ollama-url:  default http://localhost:11434
+#   --max-tokens:  per-case generation cap (default 512 — matches the run that verified
+#                  qwen2.5-0.5b's 22.9% strict-accuracy number; changing it changes what
+#                  "verified" means, so it's not a casual knob)
+#   --concurrency: cases in flight at once (default 6 — same provenance as --max-tokens)
+#   --timeout:     per-case generation deadline in seconds (default 120)
+
+# Then score exactly what was generated:
+swift run manifold-eval ifeval --corpus ifeval.jsonl --responses responses.jsonl --out IFEVAL.md
+```
+
+IFEval cases are independent single-turn text generations with no shared state between cases, so this
+fans out up to `--concurrency` cases at once, each against its own `InferenceService`/`OllamaBackend`
+pair — a single shared service's generation queue is FIFO, so sharing one across workers would
+silently serialize them and defeat `--concurrency`. Greedy/deterministic (`temperature: 0`), no tools.
+
+**Resumable**: if `--out` already exists, keys already present are read and skipped, and new entries
+are appended (not overwritten) — a crash or Ctrl-C partway through a multi-hour full-corpus run loses
+nothing already generated, because each *successful* case is written to disk (through a single actor
+that serializes concurrent workers' writes) as soon as it finishes, not batched at the end. A case
+that errors or times out is deliberately **not** written to `--out` — writing an empty placeholder
+would make that key permanently "present" and never eligible for retry; leaving it absent instead
+means the next invocation retries it automatically (and `ifeval`'s scorer already treats a missing
+key as "score against empty string", so a still-failing case scores identically either way).
+
 ### `mteb`
 
 Runs the MTEB STS-Benchmark lane: embeds sentence pairs through an Ollama embedding model and reports
@@ -193,7 +228,7 @@ for the live same-model cross-quant verification that found a real Q4 correctnes
 
 ## Running real eval lanes
 
-The model-driven lanes (`mteb`, `diff`, `regress`, `bfcl-generate`) and the corpus-gated tests need
+The model-driven lanes (`mteb`, `diff`, `regress`, `bfcl-generate`, `ifeval-generate`) and the corpus-gated tests need
 local models and are gated behind env vars so `swift test` stays hermetic. Fetch the real corpora
 first:
 
@@ -208,6 +243,7 @@ Then enable the gated tests (each prints its own invocation after fetch):
 BFCL_GORILLA_CACHE=~/.cache/manifold-eval/bfcl swift test --filter BFCLRealCorpusTests
 RUN_OLLAMA_EMBED=1 STSB_DATA=~/.cache/manifold-eval/stsb_test.json swift test --filter MTEBRealCorpusTests
 RUN_OLLAMA_LIVE=1 swift test --filter RegressionCrossQuantLiveTests   # needs two quant tags pulled
+RUN_OLLAMA_LIVE=1 OLLAMA_MODEL=qwen2.5-0.5b swift test --filter IFEvalGenerateLiveTests
 ```
 
 ## Architecture

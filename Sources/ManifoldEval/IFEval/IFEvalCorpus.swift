@@ -4,8 +4,10 @@ import Foundation
 ///
 /// The full IFEval corpus (`google/IFEval` on HuggingFace or
 /// `google-research/instruction_following_eval`) has 541 cases. The test
-/// target bundles the corpus as `Fixtures/ifeval.jsonl` (a `.copy` resource);
-/// set `IFEVAL_DATA_PATH` to override with a local file.
+/// target bundles a small fixture slice as `Fixtures/ifeval.jsonl` (a `.copy`
+/// resource); the `ifeval` / `ifeval-generate` CLI subcommands take an
+/// explicit `--corpus <path>` flag for the real corpus — there is no
+/// environment-variable override (nothing in this repo reads one).
 public enum IFEvalCorpus {
 
     public enum LoadError: Error {
