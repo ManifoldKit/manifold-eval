@@ -1,0 +1,132 @@
+name: Bump core pin (on ManifoldKit release)
+
+# Fans a ManifoldKit release out into this repo automatically.
+#
+# Trigger: ManifoldKit's release-please workflow fires repository_dispatch
+# of type `core-release` (payload.tag = the new core tag) on every release
+# (see ManifoldKit/ManifoldKit .github/workflows/release-please.yml,
+# notify-companions job). workflow_dispatch is provided for manual runs and
+# for catching this repo up to a release that shipped before this workflow
+# existed. NOTE: the org-move dispatch PAT is currently broken (see
+# ManifoldKit MEMORY notes on the org move), so workflow_dispatch is the
+# operative trigger for now — dispatch by hand until it's re-scoped.
+#
+# Unlike the companion packages (manifold-mlx / manifold-llama), this repo
+# pins ManifoldKit with `exact:` rather than `.upToNextMinor(from:)` — eval
+# tracks core lockstep, not a floor — and has no release-please of its own
+# (deliberate: eval has no downstream release automation to trip). What it
+# does, gated on a real green build:
+#   1. Rewrite the ManifoldKit `exact: "X.Y.Z"` pin to the new version.
+#      No-op (exits clean) if already at that version — safe to re-dispatch.
+#   2. Re-resolve, build, and test against the new core (the actual gate;
+#      mirrors ci.yml's invocation exactly — fixture tests only, no models).
+#   3. Commit Package.swift + Package.resolved, open a `fix:` PR, and
+#      admin-squash-merge it. The merge is the end state — there is no
+#      further automation to trip.
+#
+# Requires secret RELEASE_AUTOMERGE_TOKEN: a fine-grained PAT on this repo
+# with Contents: read+write and Pull requests: read+write. enforce_admins is
+# off on main, so an admin-owned PAT bypasses the redundant required check
+# (the inline gate above already ran the identical suite). If the secret is
+# absent, the merge step fails and the PR is left open for manual merge.
+
+on:
+  repository_dispatch:
+    types: [core-release]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "ManifoldKit tag to pin to (e.g. v0.63.0)"
+        required: true
+        type: string
+
+# Serialize: never let two bumps race on main.
+concurrency:
+  group: core-bump
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: macos-15
+    steps:
+      - name: Resolve target tag
+        id: tag
+        env:
+          DISPATCH_TAG: ${{ github.event.client_payload.tag }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          TAG="${DISPATCH_TAG:-$INPUT_TAG}"
+          if [ -z "$TAG" ]; then
+            echo "::error::No tag supplied by dispatch payload or workflow input." >&2
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Tag '$TAG' did not yield an X.Y.Z version." >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Target: $TAG (pin version $VERSION)"
+
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          # PAT so the eventual merge push is admin-authored, matching the
+          # companion packages' pattern (see comment above).
+          token: ${{ secrets.RELEASE_AUTOMERGE_TOKEN }}
+
+      - name: Rewrite ManifoldKit pin
+        id: edit
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          perl -0pi -e 's{(ManifoldKit/ManifoldKit\.git"[^\n]*exact:\s*")[0-9]+\.[0-9]+\.[0-9]+(")}{${1}'"$VERSION"'${2}}g' Package.swift
+          if git diff --quiet -- Package.swift; then
+            echo "Pin already at $VERSION — nothing to do."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git --no-pager diff -- Package.swift
+          fi
+
+      - name: Re-resolve against new core
+        if: steps.edit.outputs.changed == 'true'
+        run: swift package resolve
+
+      - name: Build (incl. tests)
+        if: steps.edit.outputs.changed == 'true'
+        run: swift build --build-tests
+
+      - name: Test
+        if: steps.edit.outputs.changed == 'true'
+        run: swift test
+
+      - name: Open and merge bump PR
+        if: steps.edit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_AUTOMERGE_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          BRANCH="auto/bump-manifoldkit-${TAG}"
+          git config user.name "manifold-release-bot"
+          git config user.email "noreply@github.com"
+          git checkout -b "$BRANCH"
+          git add Package.swift Package.resolved
+          git commit -m "fix: bump ManifoldKit pin to ${TAG}"
+          git push --force-with-lease origin "$BRANCH"
+          PR_URL=$(gh pr create \
+            --title "fix: bump ManifoldKit pin to ${TAG}" \
+            --body "Automated: ManifoldKit ${TAG} shipped. Pin re-resolved, built, and tested green against the new core." \
+            --head "$BRANCH" --base main)
+          echo "Opened $PR_URL"
+          # Inline gate already ran the identical suite; admin-merge past the
+          # redundant required check (enforce_admins is off on main).
+          gh pr merge "$PR_URL" --squash --admin --delete-branch
+          echo "Merged $PR_URL"
