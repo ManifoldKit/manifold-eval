@@ -10,6 +10,8 @@ import ManifoldTools
 //                         [options…]
 //   manifold-eval ifeval  --corpus <path> --responses <jsonl> [--out PATH]
 //   manifold-eval bfcl    --corpus <dir>  --responses <jsonl> [--out PATH]
+//   manifold-eval bfcl-generate --ollama-model <tag> [--category simple|multiple|parallel|parallel_multiple|irrelevance|all]
+//                         [--ollama-url URL] [--cache-dir DIR] --out <responses.jsonl> [--timeout SECONDS]
 //   manifold-eval mteb    --dataset <path-or-fixture> [--ollama-model <tag>] [--out PATH]
 //   manifold-eval regress --backend ollama|llama --baseline-model M --redriven-model M
 //                         --prompt-file P --expected REF [options…]
@@ -34,6 +36,8 @@ guard let subcommand = arguments.first else {
     print("                     [--core-commit SHA] [--out DIVERGENCE.md]")
     print("  manifold-eval ifeval --corpus <path> --responses <jsonl> [--out PATH]")
     print("  manifold-eval bfcl   --corpus <dir>  --responses <jsonl> [--out PATH]")
+    print("  manifold-eval bfcl-generate --ollama-model <tag> [--category simple|multiple|parallel|parallel_multiple|irrelevance|all]")
+    print("                     [--ollama-url URL] [--cache-dir DIR] --out <responses.jsonl> [--timeout SECONDS]")
     print("  manifold-eval mteb   --dataset <path-or-fixture> [--ollama-model nomic-embed-text] [--out PATH]")
     print("  manifold-eval regress --backend ollama|llama --baseline-model M --redriven-model M")
     print("                     --prompt-file P --expected REF [--scorer contains|exact] [--ignore-case]")
@@ -119,6 +123,12 @@ case "ifeval":
 case "bfcl":
     await BFCLCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
+case "bfcl-generate":
+    // Drives a live Ollama model over the BFCL corpus and writes the
+    // BFCLResponseEntry JSONL that `bfcl` scores — the full-corpus generator
+    // `bfcl`/`cliRun` never had. See BFCLGenerateCommand.
+    await BFCLGenerateCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+
 case "mteb":
     await MTEBCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
@@ -128,5 +138,5 @@ case "regress":
     await RegressCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
 default:
-    die("unknown subcommand '\(subcommand)' (expected: collate, diff, ifeval, bfcl, mteb, regress)", code: 2)
+    die("unknown subcommand '\(subcommand)' (expected: collate, diff, ifeval, bfcl, bfcl-generate, mteb, regress)", code: 2)
 }

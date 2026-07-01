@@ -274,9 +274,18 @@ public struct BFCLLane: Sendable {
         return totalMatched == groundTruth.count
     }
 
-    // MARK: - Private: corpus loading
+    // MARK: - Corpus loading
 
-    private func loadCases(
+    /// Loads the cases for one category from `source` — the SAME loader used
+    /// internally by ``run(categories:corpusSource:emit:)``.
+    ///
+    /// Exposed (not `private`) so a generator (e.g. `manifold-eval
+    /// bfcl-generate`) can load the exact same cases — same ids, same corpus
+    /// source — that a later scoring run will see. Reusing this loader instead
+    /// of re-deriving corpus paths is what eliminates the corpus-layout /
+    /// id-namespace mismatches by construction: generate and score always walk
+    /// the identical path.
+    public func loadCases(
         category: BFCLCategory,
         source: CorpusSource
     ) async throws -> [BFCLLoadedCase] {

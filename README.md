@@ -22,7 +22,7 @@ swift build
 swift test          # fixture-driven; no models, no network — hosted-CI safe
 ```
 
-The CLI is a single executable with six subcommands. Run it with no arguments for usage:
+The CLI is a single executable with seven subcommands. Run it with no arguments for usage:
 
 ```sh
 swift run manifold-eval
@@ -38,6 +38,7 @@ in hosted CI — see [Running real eval lanes](#running-real-eval-lanes).
 | [`collate`](#collate) | Fold per-backend `ConformanceRecord` JSON into one cross-runtime matrix | no |
 | [`ifeval`](#ifeval--bfcl-offline-scorers) | Score pre-computed responses against the IFEval corpus | no |
 | [`bfcl`](#ifeval--bfcl-offline-scorers) | Score pre-computed tool-calls against the BFCL (Gorilla v4) corpus | no |
+| [`bfcl-generate`](#bfcl-generate) | Drive a live Ollama model over the full BFCL corpus and write the `bfcl` responses file | **yes** |
 | [`mteb`](#mteb) | Run the MTEB-STS embedding-correlation lane against an Ollama model | **yes** |
 | [`diff`](#diff) | Render a prompt once, drive backends on the *same bytes*, triage divergence | **yes** |
 | [`regress`](#regress) | Replay one prompt across two quants of a model and gate on score movement | **yes** |
@@ -80,6 +81,36 @@ swift run manifold-eval bfcl --corpus path/to/bfcl/data --responses calls.jsonl 
 Cases missing from the responses file are scored as empty (for BFCL, the `irrelevance` category
 passes on an empty call list; every other category counts as a miss). With `--out`, a one-line
 accuracy summary also prints to stdout.
+
+### `bfcl-generate`
+
+The full-corpus BFCL *generator* — the piece `bfcl` above doesn't have. Drives a live Ollama model
+over every case in the requested categories, one at a time, and writes one `BFCLResponseEntry` JSON
+object per line: the exact schema `bfcl --responses` reads, so a generate → score round-trip needs
+no adapter or reshape step.
+
+```sh
+swift run manifold-eval bfcl-generate --ollama-model mistral:7b-instruct-tools-q4_K_M \
+    --category multiple --out multiple-responses.jsonl
+#   --category:   simple|multiple|parallel|parallel_multiple|irrelevance (comma-separated), or `all`
+#                 (default: multiple)
+#   --ollama-url: default http://localhost:11434
+#   --cache-dir:  Gorilla v4 download/cache dir (default ~/.cache/manifold-eval/bfcl)
+#   --timeout:    per-case generation deadline in seconds (default 120)
+
+# Then score exactly what was generated:
+swift run manifold-eval bfcl --corpus ~/.cache/manifold-eval/bfcl/data \
+    --responses multiple-responses.jsonl --out BFCL.md
+```
+
+Both commands load cases through the same `BFCLLane` corpus loader, so ids and corpus layout always
+match — no manual reshape, and no risk of scoring against a different id-namespace than what was
+generated (a hand-rolled full-corpus run once reported a misleading 8.0% by scoring a 25-case
+bundled-slice generation against the full 199-case `multiple` corpus; the honest slice number was
+64%). This is a capture-only pass — the tool registry is empty, so the model's first tool call is
+recorded, never dispatched/executed. Progress streams to stderr per-case, and each response is
+written to `--out` as soon as it's generated, so a multi-hour full-corpus run banks progress
+incrementally instead of risking it all on one process that runs to completion.
 
 ### `mteb`
 
@@ -150,8 +181,9 @@ for the live same-model cross-quant verification that found a real Q4 correctnes
 
 ## Running real eval lanes
 
-The model-driven lanes (`mteb`, `diff`, `regress`) and the corpus-gated tests need local models and
-are gated behind env vars so `swift test` stays hermetic. Fetch the real corpora first:
+The model-driven lanes (`mteb`, `diff`, `regress`, `bfcl-generate`) and the corpus-gated tests need
+local models and are gated behind env vars so `swift test` stays hermetic. Fetch the real corpora
+first:
 
 ```sh
 scripts/fetch-corpora.sh                 # BFCL Gorilla v4 + MTEB STS-B (cached under ~/.cache/manifold-eval)

@@ -69,4 +69,46 @@ public enum BFCLCategory: String, CaseIterable, Sendable {
     ///   stem as questions, different directory. The identical stem is intentional;
     ///   ``BFCLCorpusFetcher`` handles the directory difference.
     public var gorillaAnswersStem: String? { hasGroundTruth ? gorillaQuestionsStem : nil }
+
+    // MARK: - CLI category-list parsing
+
+    /// Thrown by ``parseList(_:)`` when a `--category` token doesn't match any
+    /// ``BFCLCategory`` raw value (and isn't the `all` keyword).
+    public enum ParseError: Error, CustomStringConvertible, Sendable, Equatable {
+        case unknownCategory(String)
+
+        public var description: String {
+            switch self {
+            case .unknownCategory(let name):
+                let known = BFCLCategory.allCases.map(\.rawValue).joined(separator: ", ")
+                return "unknown BFCL category '\(name)' (expected one of: \(known), or 'all')"
+            }
+        }
+    }
+
+    /// Parses a `--category` CLI value into the categories it selects.
+    ///
+    /// Accepts a single category (`"multiple"`), a comma-separated list
+    /// (`"simple,multiple"`), or the literal `"all"` (case-insensitive), which
+    /// expands to ``allCases``. Whitespace around tokens is trimmed. An unknown
+    /// token throws ``ParseError/unknownCategory(_:)`` rather than silently
+    /// dropping it — a typo'd category name must fail loudly, not quietly score
+    /// zero cases.
+    public static func parseList(_ raw: String) throws -> [BFCLCategory] {
+        let tokens = raw
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+
+        if tokens.count == 1, tokens[0].lowercased() == "all" {
+            return BFCLCategory.allCases
+        }
+
+        return try tokens.map { token in
+            guard let category = BFCLCategory(rawValue: token) else {
+                throw ParseError.unknownCategory(token)
+            }
+            return category
+        }
+    }
 }
