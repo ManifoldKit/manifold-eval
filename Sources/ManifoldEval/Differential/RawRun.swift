@@ -5,11 +5,14 @@ import Foundation
 /// settings — an unequal sampler is itself a confound the triage must be able to
 /// see, not a hidden variable.
 ///
-/// The field set is the fixed P2 contract (plan §13b component 1). Note that the
-/// external-runner flag surface only plumbs `temperature` / `seed` / `maxTokens`
-/// (`--temperature` / `--seed` / `--max-tokens`); `topK` / `repeatPenalty` are
-/// *recorded* for honesty but are the backend's own defaults in P2.1 — see
-/// `OllamaRawDriver` for how the Ollama leg keeps the recorded value truthful.
+/// The field set is the fixed P2 contract (plan §13b component 1). The
+/// external-runner flag surface plumbs all five fields — `temperature` / `seed` /
+/// `maxTokens` (`--temperature` / `--seed` / `--max-tokens`) from P2.1, and as of
+/// a PR #13 follow-up, `topK` / `repeatPenalty` (`--top-k` / `--repeat-penalty`)
+/// too, forwarded to the external runner in lockstep with the corresponding
+/// manifold-llama-side `manifold-llama-eval` change — see `LlamaRunnerDriver`
+/// for the invocation contract. See `OllamaRawDriver` for how the Ollama leg
+/// keeps its own recorded value truthful on the wire.
 public struct SamplerConfig: Codable, Sendable, Equatable {
     public var temperature: Double
     public var seed: Int

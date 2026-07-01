@@ -110,12 +110,21 @@ swift run manifold-eval diff --model mistral:7b-instruct \
 swift run manifold-eval diff --model mistral:7b-instruct \
     --messages-file chat.json --template-gguf ./mistral.gguf \
     --llama-runner "./llama-run --model ./mistral.gguf" --out DIVERGENCE.md
+
+# force-match both legs' sampler when debugging a divergence (defaults: top-k
+# disabled, repeat-penalty a no-op — both legs already agree on these unless
+# overridden). Both flags reach the Ollama leg AND, when --llama-runner is
+# passed, the external runner's own --top-k/--repeat-penalty flags:
+swift run manifold-eval diff --model mistral:7b-instruct \
+    --prompt-file probe.txt --top-k 0 --repeat-penalty 1.0 --out DIVERGENCE.md
 ```
 
 Exit codes: `0` = no actionable divergence (identical / sampler-nondeterminism); `1` = a control
 failure or genuine divergence a human should inspect (prompt / tokenizer / sampler-mismatch /
 genuine, or an Ollama-only determinism control that came back VARIANT); `3` = indeterminate — rerun
-with more `--repeats`.
+with more `--repeats`; `4` = both outputs are the same short repeating unit at different lengths (a
+stopping-length artifact, not a content difference) — worth a look, but distinct from a genuine
+divergence.
 
 ### `regress`
 

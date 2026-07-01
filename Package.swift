@@ -59,6 +59,9 @@ let package = Package(
                 // EmbeddingBackend (from ManifoldContract via ManifoldInference) is needed
                 // for the MTEB test double (AlwaysFailEmbedder) and the live embedding tests.
                 .product(name: "ManifoldInference", package: "ManifoldKit"),
+                // @testable import for DiffCommand's argv-parsing tests — no network I/O
+                // is exercised (parseArguments is pure), so this stays hermetic.
+                "manifold-eval",
             ],
             resources: [.copy("Fixtures")]
         ),

@@ -9,11 +9,10 @@ import ManifoldEval
 /// report is never polluted by progress noise.
 enum DiffCommand {
 
-    static func run(
-        _ args: [String],
-        die: (String, Int32) -> Never,
-        warn: (String) -> Void
-    ) async {
+    /// The result of parsing `diff`'s argv — extracted from ``run`` so the flag
+    /// grammar (including `--top-k` / `--repeat-penalty`) is unit-testable
+    /// without touching the network (no Ollama probe, no harness run).
+    struct ParsedArguments {
         var model: String?
         var promptFile: String?
         var messagesFile: String?
@@ -24,11 +23,20 @@ enum DiffCommand {
         var seed = 0
         var maxTokens = 128
         var temperature = 0.0
+        var topK = 0
+        var repeatPenalty = 1.0
         var bosID: Int?
         var cohort: Cohort?
         var ollamaURLString = "http://localhost:11434"
         var coreCommit = "unknown"
         var outPath: String?
+    }
+
+    /// Parses argv into ``ParsedArguments``. `die` is invoked (and never
+    /// returns) on any malformed flag/value; well-formed argv returns without
+    /// calling it.
+    static func parseArguments(_ args: [String], die: (String, Int32) -> Never) -> ParsedArguments {
+        var parsed = ParsedArguments()
 
         func value(_ index: inout Int, _ flag: String) -> String {
             index += 1
@@ -45,34 +53,65 @@ enum DiffCommand {
         while index < args.count {
             let token = args[index]
             switch token {
-            case "--model": model = value(&index, token)
-            case "--prompt-file": promptFile = value(&index, token)
-            case "--messages-file": messagesFile = value(&index, token)
-            case "--template-gguf": templateGGUF = value(&index, token)
-            case "--llama-runner": llamaRunner = value(&index, token)
-            case "--llama-model": llamaModel = value(&index, token)
-            case "--repeats": repeats = intValue(&index, token)
-            case "--seed": seed = intValue(&index, token)
-            case "--max-tokens": maxTokens = intValue(&index, token)
+            case "--model": parsed.model = value(&index, token)
+            case "--prompt-file": parsed.promptFile = value(&index, token)
+            case "--messages-file": parsed.messagesFile = value(&index, token)
+            case "--template-gguf": parsed.templateGGUF = value(&index, token)
+            case "--llama-runner": parsed.llamaRunner = value(&index, token)
+            case "--llama-model": parsed.llamaModel = value(&index, token)
+            case "--repeats": parsed.repeats = intValue(&index, token)
+            case "--seed": parsed.seed = intValue(&index, token)
+            case "--max-tokens": parsed.maxTokens = intValue(&index, token)
             case "--temperature":
                 let raw = value(&index, token)
                 guard let d = Double(raw) else { die("--temperature requires a number, got '\(raw)'", 2) }
-                temperature = d
-            case "--bos": bosID = intValue(&index, token)
+                parsed.temperature = d
+            case "--top-k": parsed.topK = intValue(&index, token)
+            case "--repeat-penalty":
+                let raw = value(&index, token)
+                guard let d = Double(raw) else { die("--repeat-penalty requires a number, got '\(raw)'", 2) }
+                parsed.repeatPenalty = d
+            case "--bos": parsed.bosID = intValue(&index, token)
             case "--cohort":
                 let raw = value(&index, token)
                 guard let c = Cohort(rawValue: raw) else {
                     die("--cohort must be sameWeights|sameFamily|cloud, got '\(raw)'", 2)
                 }
-                cohort = c
-            case "--ollama-url": ollamaURLString = value(&index, token)
-            case "--core-commit": coreCommit = value(&index, token)
-            case "--out": outPath = value(&index, token)
+                parsed.cohort = c
+            case "--ollama-url": parsed.ollamaURLString = value(&index, token)
+            case "--core-commit": parsed.coreCommit = value(&index, token)
+            case "--out": parsed.outPath = value(&index, token)
             default:
                 die("unknown flag '\(token)'", 2)
             }
             index += 1
         }
+        return parsed
+    }
+
+    static func run(
+        _ args: [String],
+        die: (String, Int32) -> Never,
+        warn: (String) -> Void
+    ) async {
+        let parsed = parseArguments(args, die: die)
+        let model = parsed.model
+        let promptFile = parsed.promptFile
+        let messagesFile = parsed.messagesFile
+        let templateGGUF = parsed.templateGGUF
+        let llamaRunner = parsed.llamaRunner
+        let llamaModel = parsed.llamaModel
+        let repeats = parsed.repeats
+        let seed = parsed.seed
+        let maxTokens = parsed.maxTokens
+        let temperature = parsed.temperature
+        let topK = parsed.topK
+        let repeatPenalty = parsed.repeatPenalty
+        let bosID = parsed.bosID
+        let cohort = parsed.cohort
+        let ollamaURLString = parsed.ollamaURLString
+        let coreCommit = parsed.coreCommit
+        let outPath = parsed.outPath
 
         // --- Validate argument combinations ---
         guard let model else { die("diff requires --model <ollama-tag>", 2) }
@@ -116,7 +155,22 @@ enum DiffCommand {
         }
 
         // --- Build the harness ---
-        let sampler = SamplerConfig(temperature: temperature, seed: seed, maxTokens: maxTokens)
+        // topK / repeatPenalty are exposed so an operator debugging a divergence
+        // can explicitly force-match both legs' sampler config instead of being
+        // stuck with the hardcoded neutral defaults (topK=0 "disabled",
+        // repeatPenalty=1.0 "no-op") — see OllamaRawDriver's doc comments for why
+        // these matter the moment either leg runs above temperature 0. Both
+        // values reach BOTH legs: OllamaRawDriver's request body, and (as of a
+        // PR #13 follow-up) LlamaRunnerDriver's `--top-k`/`--repeat-penalty`
+        // flags to the external runner — see LlamaRunnerDriver's doc comment for
+        // the invocation contract.
+        let sampler = SamplerConfig(
+            temperature: temperature,
+            seed: seed,
+            topK: topK,
+            repeatPenalty: repeatPenalty,
+            maxTokens: maxTokens
+        )
         let bos: BOSNormalization = bosID.map { .explicit(bosID: $0) } ?? .autoDetect
 
         // Best-effort Ollama version for the tooling record — a failure here is a
@@ -180,6 +234,11 @@ enum DiffCommand {
         //        back VARIANT (the control itself failed — N3)
         //   3 = indeterminate — a leg's determinism was never assessed; rerun with
         //       more --repeats (neither a clean pass nor a confirmed divergence)
+        //   4 = degenerateRepetitionLengthMismatch — both outputs are the same
+        //       repeating unit at different lengths, a stopping-length artifact.
+        //       Non-zero (worth a look — why did the lengths differ?) but
+        //       deliberately distinct from 1 so a script can tell "same content,
+        //       different repeat count" apart from a genuine content divergence.
         guard let divergence = outcome.comparison?.divergence else {
             // Ollama-only run: no cross-backend comparison, just the determinism
             // control. A VARIANT control (assessed but not reproducible) is itself a
@@ -195,6 +254,8 @@ enum DiffCommand {
             exit(1)
         case .indeterminate:
             exit(3)
+        case .degenerateRepetitionLengthMismatch:
+            exit(4)
         case .identical, .samplerNondeterminism:
             exit(0)
         }

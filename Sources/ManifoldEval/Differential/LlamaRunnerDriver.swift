@@ -12,7 +12,20 @@ import Foundation
 /// Fixed flag surface (the contract — do not extend without changing both repos):
 ///
 ///     <command> --model <gguf> --prompt-file <path> --temperature <d> \
-///               --seed <n> --max-tokens <n> --repeat-index <n>
+///               --seed <n> --max-tokens <n> --top-k <n> --repeat-penalty <d> \
+///               --repeat-index <n>
+///
+/// `--top-k` / `--repeat-penalty` were added here in a follow-up to PR #13:
+/// PR #13 shipped `diff --top-k`/`--repeat-penalty` and wired them honestly into
+/// the Ollama leg (`OllamaRawDriver`), but silently never forwarded them to this
+/// driver — so the "force-match both legs' sampler" claim in the README/CLI help
+/// was false for the llama.cpp leg. This widening is coordinated with a matching
+/// change to the external runner itself; see the corresponding manifold-llama PR
+/// adding `--top-k`/`--repeat-penalty` to `manifold-llama-eval` (with defaults
+/// that preserve prior neutral behaviour when omitted, but an old runner
+/// binary built before that PR is likely to reject these two now-always-sent
+/// flags as unrecognized — the runner and this driver should be upgraded
+/// together, per the "do not extend without changing both repos" rule above).
 public struct LlamaRunnerDriver: Sendable {
     /// The runner command. May be multi-token (e.g.
     /// `"swift run --package-path ../manifold-llama eval-runner"`); it is executed
@@ -36,6 +49,8 @@ public struct LlamaRunnerDriver: Sendable {
             + " --temperature " + String(sampler.temperature)
             + " --seed " + String(sampler.seed)
             + " --max-tokens " + String(sampler.maxTokens)
+            + " --top-k " + String(sampler.topK)
+            + " --repeat-penalty " + String(sampler.repeatPenalty)
             + " --repeat-index " + String(repeatIndex)
 
         let process = Process()

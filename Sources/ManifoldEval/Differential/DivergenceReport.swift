@@ -82,6 +82,12 @@ public enum DivergenceReport {
             return "A leg's determinism was never assessed (fewer than 2 repeats), so reproducibility "
                 + "is unknown — neither a clean pass nor a confirmed divergence. Re-run with more "
                 + "`--repeats` to resolve it."
+        case .degenerateRepetitionLengthMismatch:
+            return "Same prompt and tokens, both backends reproducible — but both outputs are the "
+                + "*same* short repeating unit, differing only in how many times it repeated before "
+                + "each backend's own stopping criterion fired. **This is a repetition/stopping-length "
+                + "artifact, not necessarily a model output difference** — worth a look (why did the two "
+                + "backends stop at different lengths?), but distinct from a genuine content divergence."
         case .genuineDivergence:
             return "Same prompt, both backends reproducible, same input tokens — outputs still differ. "
                 + "**Genuine divergence: worth a human.**"
