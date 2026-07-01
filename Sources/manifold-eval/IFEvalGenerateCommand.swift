@@ -12,19 +12,23 @@ import ManifoldOllama
 /// later score run always see identical case keys — there is no separate
 /// reshape step and no key-namespace mismatch between the two commands.
 ///
-/// Unlike `bfcl-generate` (sequential — BFCL cases share a tool registry),
-/// IFEval cases are independent single-turn text generations, so this fans
-/// out up to `--concurrency` cases at once, each against its OWN
-/// `InferenceService`/`OllamaBackend` pair (one per worker slot) — a single
-/// shared service's `GenerationQueue` is FIFO, so sharing one across workers
-/// would silently serialize them and defeat `--concurrency`.
+/// IFEval cases are independent single-turn text generations with no shared
+/// state, so this fans out up to `--concurrency` cases at once, each against
+/// its OWN `InferenceService`/`OllamaBackend` pair (one per worker slot) — a
+/// single shared service's `GenerationQueue` (ManifoldInference) is a FIFO
+/// queue, so sharing one across workers would silently serialize them and
+/// defeat `--concurrency`.
 ///
 /// Resumable: if `--out` already exists, keys already present are loaded via
 /// `IFEvalLane.loadResponses(from:)` and skipped; new entries are appended
-/// (not overwritten), and each completed case is written to disk as soon as
+/// (not overwritten), and each SUCCESSFUL case is written to disk as soon as
 /// it finishes — via a single actor serializing writes — so a crash or
 /// Ctrl-C partway through a multi-hour full-corpus run banks everything
-/// generated so far.
+/// generated so far. An errored/timed-out case is deliberately NOT persisted
+/// (see ``IFEvalLane/generateResponses(cases:completedKeys:concurrency:onProgress:onEntry:emit:)``'s
+/// `onEntry` doc) so a transient failure stays eligible for automatic retry
+/// on the next invocation instead of being permanently stuck as an empty
+/// response.
 ///
 /// Usage:
 ///
@@ -75,6 +79,16 @@ enum IFEvalGenerateCommand {
         }
 
         // --- Resumability: skip keys already present in --out ---
+        //
+        // NOTE: `loadResponses` throws on the first malformed JSONL line, so a
+        // process killed mid-`write(2)` of the trailing line (not just
+        // mid-generation — a true crash inside a single write syscall, which
+        // `seekToEndOfFile()`-then-append does not protect against) would
+        // make resume fail loudly here rather than degrade gracefully by
+        // dropping the truncated tail. In practice a Ctrl-C or OOM kill lands
+        // between cases, not inside a single small write, so this is a narrow
+        // edge case; the fix (if it ever bites) is deleting the truncated
+        // last line by hand and re-running.
         var completedKeys: Set<String> = []
         if FileManager.default.fileExists(atPath: outPath) {
             do {
@@ -105,21 +119,25 @@ enum IFEvalGenerateCommand {
         // `InferenceService` processes one generation at a time. To get REAL
         // concurrency against Ollama (the whole point of `--concurrency`),
         // each worker slot gets its own backend/service pair rather than
-        // sharing one, mirroring how `bfcl-generate` builds a single service
-        // (it never needs more than one — its loop is sequential by design).
+        // sharing one.
         let workerCount = max(1, options.concurrency)
         var built: [InferenceService] = []
         for slot in 0..<workerCount {
             // `OllamaBackend(_registrar:)` (used by ManifoldKit's own
             // `manifold-tools bfcl`) is `package`-scoped and unreachable from
             // an external consumer like this repo. The public
-            // `init(urlSession:)` is deprecated in favor of the app-level
-            // registrar/`quickStart` path, but that path is for multi-backend
-            // `ModelRegistry` dispatch — overkill for a one-shot,
-            // fixed-model-per-worker capture harness. Direct construction
-            // (same as the deprecation notice's own fallback, and the same
-            // call `bfcl-generate` already makes) is the right-sized tool.
-            let ollama = OllamaBackend(urlSession: nil)
+            // `init(urlSession:)` is deprecated AND traps (fatal error, not a
+            // catchable error) if `URLSessionProvider.networkDisabled` is set
+            // — the wrong failure mode for a CLI that otherwise reports every
+            // error via `die(...)`. `makeChecked(urlSession:)` is the same
+            // direct-construction escape hatch but propagates that condition
+            // as a catchable `CloudBackendError.networkDisabled` instead.
+            let ollama: OllamaBackend
+            do {
+                ollama = try OllamaBackend.makeChecked(urlSession: nil)
+            } catch {
+                die("ifeval-generate: failed to construct Ollama backend (worker \(slot)): \(error)", 1)
+            }
             ollama.configure(baseURL: ollamaURL, modelName: options.ollamaModel)
             do {
                 try await ollama.loadModel(from: ollamaURL, plan: .cloud())
@@ -140,7 +158,7 @@ enum IFEvalGenerateCommand {
             + "(concurrency \(workerCount), max-tokens \(options.maxTokens), timeout \(Int(options.timeoutSeconds))s)"
         )
 
-        // --- Stream JSONL to disk as each case completes ---
+        // --- Stream JSONL to disk as each SUCCESSFUL case completes ---
         //
         // A full 541-case run is a potentially multi-hour operation even with
         // concurrency. Writing each entry as it completes (through a single
@@ -157,7 +175,18 @@ enum IFEvalGenerateCommand {
             completedKeys: completedKeys,
             concurrency: workerCount,
             onProgress: { warn($0) },
-            onEntry: { entry in await writer.append(entry) },
+            onEntry: { entry, isError in
+                // Deliberately do NOT persist an errored case: writing its
+                // empty-response entry would make the key permanently
+                // "present" in `--out`, and the resume check above only looks
+                // at presence, not success — a transient timeout would then
+                // never be retried. Omitting it instead leaves the key
+                // missing, which `ifeval`'s scorer already treats as "score
+                // against empty string" (identical verdict to persisting an
+                // empty response), while keeping it eligible for the next run.
+                guard !isError else { return }
+                await writer.append(entry)
+            },
             emit: { slot, testCase in
                 try await Self.generateResponse(
                     prompt: testCase.prompt,
@@ -248,9 +277,9 @@ enum IFEvalGenerateCommand {
 // MARK: - Serialized JSONL append
 
 /// Serializes appends to the `--out` file so concurrent workers' completions
-/// never interleave/corrupt it — the crash-resilience property `bfcl-generate`
-/// established via streamed (not batched) writes, extended here to a
-/// genuinely concurrent producer set.
+/// never interleave/corrupt it — writes are streamed one entry at a time
+/// (never batched to the end), and this actor is the sole writer even though
+/// multiple worker tasks call `append` concurrently.
 private actor ResponseWriter {
     private let fileHandle: FileHandle
     private let warn: @Sendable (String) -> Void

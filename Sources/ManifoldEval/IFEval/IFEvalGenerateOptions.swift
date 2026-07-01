@@ -2,10 +2,9 @@ import Foundation
 
 /// Parsed, validated arguments for `manifold-eval ifeval-generate`.
 ///
-/// Parsing lives here (not in the `manifold-eval` executable) so it's testable
-/// with `@testable import ManifoldEval` and no CLI process spawn — the same
-/// reason `BFCLCategory.parseList` lives in the library rather than inline in
-/// `BFCLGenerateCommand`.
+/// Parsing lives here (in the `ManifoldEval` library), not inline in the
+/// `manifold-eval` executable, so it's testable with `@testable import
+/// ManifoldEval` and no CLI process spawn.
 public struct IFEvalGenerateOptions: Sendable, Equatable {
     public var ollamaModel: String
     public var corpusPath: String

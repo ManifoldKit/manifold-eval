@@ -6,8 +6,8 @@ import XCTest
 /// generation loop (``IFEvalLane/generateResponses(cases:completedKeys:concurrency:onProgress:onEntry:emit:)``).
 ///
 /// All tests use synthetic `emit` closures — no live model or Ollama server is
-/// required (mirrors ``BFCLGenerateTests``'s convention). A live-gated smoke
-/// test against a real Ollama server lives in ``IFEvalGenerateLiveTests``.
+/// required. A live-gated smoke test against a real Ollama server lives in
+/// ``IFEvalGenerateLiveTests``.
 final class IFEvalGenerateTests: XCTestCase {
 
     // MARK: - Fixture helpers
@@ -253,13 +253,109 @@ final class IFEvalGenerateTests: XCTestCase {
 
         let result = await IFEvalLane.generateResponses(
             cases: cases,
-            onEntry: { entry in await seen.insert(entry.key) },
+            onEntry: { entry, _ in await seen.insert(entry.key) },
             emit: { _, _ in "x" }
         )
 
         let seenKeys = await seen.keys
         XCTAssertEqual(seenKeys, Set(cases.map(\.key)), "onEntry must fire exactly once per attempted case")
         XCTAssertEqual(result.entries.count, 5)
+    }
+
+    func testGenerateResponses_onEntryReportsIsErrorAccurately() async throws {
+        let cases = try loadFixtureCases(4)
+        let failingKey = cases[1].key
+        struct FakeError: Error {}
+
+        actor ErrorFlags {
+            var flagsByKey: [String: Bool] = [:]
+            func record(_ key: String, isError: Bool) { flagsByKey[key] = isError }
+        }
+        let flags = ErrorFlags()
+
+        _ = await IFEvalLane.generateResponses(
+            cases: cases,
+            onEntry: { entry, isError in await flags.record(entry.key, isError: isError) },
+            emit: { _, testCase in
+                if testCase.key == failingKey { throw FakeError() }
+                return "ok"
+            }
+        )
+
+        let recorded = await flags.flagsByKey
+        XCTAssertEqual(recorded[failingKey], true, "the failing case must report isError: true to onEntry")
+        for testCase in cases where testCase.key != failingKey {
+            XCTAssertEqual(recorded[testCase.key], false, "a successful case must report isError: false to onEntry")
+        }
+    }
+
+    /// The load-bearing resumability fix: a CLI caller that (correctly) skips
+    /// persisting an errored entry — because `isError` was `true` — must see
+    /// that case treated as NOT completed on the next `generateResponses`
+    /// call, i.e. it gets retried rather than permanently stuck. This
+    /// simulates exactly what `IFEvalGenerateCommand`'s `onEntry` does: only
+    /// keys from SUCCESSFUL entries end up in the next run's `completedKeys`.
+    func testGenerateResponses_erroredCaseIsRetriedOnNextInvocation_whenOnlySuccessesArePersisted() async throws {
+        let cases = try loadFixtureCases(4)
+        let flakyKey = cases[2].key
+        struct FlakyFailure: Error {}
+
+        // Shared, actor-serialized state simulating what the CLI tracks
+        // across a first run and a resumed second run.
+        actor RunState {
+            var attemptCounts: [String: Int] = [:]
+            var persistedKeys: Set<String> = []
+
+            func recordAttempt(_ key: String) -> Int {
+                attemptCounts[key, default: 0] += 1
+                return attemptCounts[key]!
+            }
+
+            func persist(_ key: String, isError: Bool) {
+                if !isError { persistedKeys.insert(key) }
+            }
+        }
+        let state = RunState()
+
+        // First "run": the flaky case fails once.
+        let firstRun = await IFEvalLane.generateResponses(
+            cases: cases,
+            concurrency: 1,
+            onEntry: { entry, isError in await state.persist(entry.key, isError: isError) },
+            emit: { _, testCase in
+                let attempt = await state.recordAttempt(testCase.key)
+                if testCase.key == flakyKey, attempt == 1 {
+                    throw FlakyFailure()
+                }
+                return "ok on attempt \(attempt)"
+            }
+        )
+        XCTAssertEqual(firstRun.errored, 1)
+        var persistedKeys = await state.persistedKeys
+        XCTAssertFalse(persistedKeys.contains(flakyKey), "an errored case must not be in the persisted/completed set")
+        XCTAssertEqual(persistedKeys.count, 3, "the 3 successful cases from the first run should be persisted")
+
+        // Second "run" (a resume): completedKeys reflects only what was
+        // actually persisted (successes) — the flaky case is NOT in it, so it
+        // must be re-attempted, and this time it succeeds.
+        let secondRun = await IFEvalLane.generateResponses(
+            cases: cases,
+            completedKeys: persistedKeys,
+            concurrency: 1,
+            onEntry: { entry, isError in await state.persist(entry.key, isError: isError) },
+            emit: { _, testCase in
+                let attempt = await state.recordAttempt(testCase.key)
+                return "ok on attempt \(attempt)"
+            }
+        )
+
+        XCTAssertEqual(secondRun.attempted, 1, "only the previously-errored case should be retried")
+        XCTAssertEqual(secondRun.errored, 0)
+        let retriedEntry = try XCTUnwrap(secondRun.entries.first)
+        XCTAssertEqual(retriedEntry.key, flakyKey)
+        XCTAssertEqual(retriedEntry.response, "ok on attempt 2", "the retry must actually re-invoke emit, not reuse the failed attempt")
+        persistedKeys = await state.persistedKeys
+        XCTAssertTrue(persistedKeys.contains(flakyKey), "after the successful retry, the case is now persisted")
     }
 
     // MARK: - Round trip: generate → JSONL → existing ifeval scorer

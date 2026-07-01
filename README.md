@@ -145,14 +145,19 @@ swift run manifold-eval ifeval-generate --ollama-model qwen2.5-0.5b \
 swift run manifold-eval ifeval --corpus ifeval.jsonl --responses responses.jsonl --out IFEVAL.md
 ```
 
-Unlike `bfcl-generate` (sequential — BFCL cases share a tool registry), IFEval cases are independent
-single-turn text generations, so this fans out up to `--concurrency` cases at once, each against its
-own `InferenceService`/`OllamaBackend` pair — a single shared service's generation queue is FIFO, so
-sharing one across workers would silently serialize them. Greedy/deterministic (`temperature: 0`), no
-tools. **Resumable**: if `--out` already exists, keys already present are read and skipped, and new
-entries are appended (not overwritten) — a crash or Ctrl-C partway through a multi-hour full-corpus
-run loses nothing already generated, because each completed case is written to disk (through a single
-actor that serializes concurrent workers' writes) as soon as it finishes, not batched at the end.
+IFEval cases are independent single-turn text generations with no shared state between cases, so this
+fans out up to `--concurrency` cases at once, each against its own `InferenceService`/`OllamaBackend`
+pair — a single shared service's generation queue is FIFO, so sharing one across workers would
+silently serialize them and defeat `--concurrency`. Greedy/deterministic (`temperature: 0`), no tools.
+
+**Resumable**: if `--out` already exists, keys already present are read and skipped, and new entries
+are appended (not overwritten) — a crash or Ctrl-C partway through a multi-hour full-corpus run loses
+nothing already generated, because each *successful* case is written to disk (through a single actor
+that serializes concurrent workers' writes) as soon as it finishes, not batched at the end. A case
+that errors or times out is deliberately **not** written to `--out` — writing an empty placeholder
+would make that key permanently "present" and never eligible for retry; leaving it absent instead
+means the next invocation retries it automatically (and `ifeval`'s scorer already treats a missing
+key as "score against empty string", so a still-failing case scores identically either way).
 
 ### `mteb`
 

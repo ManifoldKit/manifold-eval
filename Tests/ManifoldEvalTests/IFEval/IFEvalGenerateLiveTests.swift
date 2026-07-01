@@ -9,14 +9,18 @@ import ManifoldOllama
 /// operational run, never CI), then score the result through the existing
 /// `ifeval` scoring path.
 ///
-/// **Env-gated** (`RUN_OLLAMA_LIVE=1`), consistent with ``BFCLGenerateLiveTests``
-/// / ``OllamaLiveSmokeTests`` — CI has no Ollama, so this skips there.
+/// **Env-gated** (`RUN_OLLAMA_LIVE=1`), consistent with ``OllamaLiveSmokeTests``
+/// — CI has no Ollama, so this skips there.
 ///
 ///     RUN_OLLAMA_LIVE=1 OLLAMA_MODEL=qwen2.5-0.5b \
 ///       swift test --filter IFEvalGenerateLiveTests
 ///
 /// This proves the full generate→score round trip actually works against a
-/// live model, not just a synthetic `emit` closure.
+/// live model, not just a synthetic `emit` closure — and, by binding one
+/// `InferenceService` per worker slot (mirroring `IFEvalGenerateCommand`
+/// exactly, rather than sharing a single service across workers), it also
+/// proves the per-slot-backend design actually delivers concurrent requests
+/// against a real Ollama server, not just against a synthetic closure.
 final class IFEvalGenerateLiveTests: XCTestCase {
 
     private var isEnabled: Bool { ProcessInfo.processInfo.environment["RUN_OLLAMA_LIVE"] == "1" }
@@ -42,20 +46,34 @@ final class IFEvalGenerateLiveTests: XCTestCase {
             throw XCTSkip("invalid OLLAMA_URL '\(baseURLString)'")
         }
 
-        let ollama = OllamaBackend(urlSession: nil)
-        ollama.configure(baseURL: baseURL, modelName: model)
-        try await ollama.loadModel(from: baseURL, plan: .cloud())
-        let service = InferenceService(backend: ollama, name: "ollama", modelName: model, toolRegistry: ToolRegistry())
+        // One InferenceService per worker slot — the same per-slot-backend
+        // design `IFEvalGenerateCommand` uses in production, NOT a single
+        // shared service. Sharing one service across concurrent workers
+        // would silently serialize every request (GenerationQueue is FIFO),
+        // which would make this test pass even if the real command's
+        // per-slot wiring were broken — defeating the point of a live test.
+        let workerCount = 2
+        var built: [InferenceService] = []
+        for slot in 0..<workerCount {
+            let ollama = try OllamaBackend.makeChecked(urlSession: nil)
+            ollama.configure(baseURL: baseURL, modelName: model)
+            try await ollama.loadModel(from: baseURL, plan: .cloud())
+            built.append(
+                InferenceService(backend: ollama, name: "ollama-worker-\(slot)", modelName: model, toolRegistry: ToolRegistry())
+            )
+        }
+        // Captured by the `@Sendable` `emit` closure below.
+        let services = built
 
         let result = await IFEvalLane.generateResponses(
             cases: cases,
-            concurrency: 2,
-            emit: { _, testCase in
+            concurrency: workerCount,
+            emit: { slot, testCase in
                 let config = GenerationConfig(
                     temperature: 0.0, topP: 0.9, repeatPenalty: 1.1, topK: 1,
                     maxOutputTokens: 512, tools: [], maxToolIterations: 1
                 )
-                let (_, stream) = try await service.enqueue(
+                let (_, stream) = try await services[slot].enqueue(
                     messages: [.user(testCase.prompt)], systemPrompt: "", config: config
                 )
                 var text = ""

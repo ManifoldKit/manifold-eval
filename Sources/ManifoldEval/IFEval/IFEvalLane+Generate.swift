@@ -12,10 +12,9 @@ import Foundation
 /// `completedKeys`. Both sides read/write the identical `IFEvalResponseEntry`
 /// schema, so a generate run and a later score run never drift out of sync.
 ///
-/// Unlike ``BFCLLane``'s sequential `generateResponses` (BFCL cases carry a
-/// tool registry and are driven one at a time against a single shared
-/// service), IFEval cases are plain single-turn text generations with no
-/// shared mutable state between cases — so this fans out up to `concurrency`
+/// IFEval cases are plain single-turn text generations with no shared mutable
+/// state between cases (unlike a tool-calling eval, where cases can share a
+/// tool registry / backend session) — so this fans out up to `concurrency`
 /// cases at once. The 541-case full IFEval corpus at up to two minutes/case
 /// would otherwise take hours run serially.
 public extension IFEvalLane {
@@ -44,10 +43,10 @@ public extension IFEvalLane {
     /// through `emit`, bounded to at most `concurrency` cases in flight at
     /// once, and returns one ``IFEvalResponseEntry`` per attempted case.
     ///
-    /// A case whose `emit` throws (timeout, backend error) is recorded with an
-    /// EMPTY response and counted in ``GenerateResult/errored`` — it does NOT
-    /// abort the run, mirroring ``BFCLLane/generateResponses``'s policy that a
-    /// single non-terminating generation must not stall a full-corpus run.
+    /// A case whose `emit` throws (timeout, backend error) is recorded in
+    /// ``GenerateResult/entries`` with an EMPTY response and counted in
+    /// ``GenerateResult/errored`` — it does NOT abort the run; a single
+    /// non-terminating generation must not stall a full-corpus run.
     ///
     /// - Parameters:
     ///   - cases: the full loaded IFEval corpus (typically `IFEvalCorpus.load(from:)`).
@@ -64,10 +63,18 @@ public extension IFEvalLane {
     ///     this to stderr so a long-running full-corpus generation is
     ///     observable rather than a silent black box.
     ///   - onEntry: called once per attempted case, as soon as its result is
-    ///     known. `async` because entries arrive concurrently from multiple
-    ///     workers — the CLI's implementation serializes disk writes through
-    ///     an actor here, so concurrent completions never interleave/corrupt
-    ///     the output file.
+    ///     known, with whether that case errored. `async` because entries
+    ///     arrive concurrently from multiple workers — the CLI's
+    ///     implementation serializes disk writes through an actor here, so
+    ///     concurrent completions never interleave/corrupt the output file.
+    ///     **The `isError` flag matters for resumability**: the CLI does NOT
+    ///     persist an errored case's empty-response entry to `--out` — if it
+    ///     did, that key would be permanently "present" in the file and a
+    ///     later resume run (which skips keys already in `--out`) would never
+    ///     retry a transient timeout/network error. Omitting it instead means
+    ///     the key is simply absent, which `ifeval`'s scorer already treats as
+    ///     "score against empty string" (the same verdict), while leaving the
+    ///     case eligible for automatic retry on the next invocation.
     ///   - emit: async closure that returns the model's response text for a
     ///     given case. The `Int` is a stable worker-slot index in
     ///     `0..<workerCount`, letting a live caller bind one backend instance
@@ -78,7 +85,7 @@ public extension IFEvalLane {
         completedKeys: Set<String> = [],
         concurrency: Int = 6,
         onProgress: @escaping @Sendable (String) -> Void = { _ in },
-        onEntry: @escaping @Sendable (IFEvalResponseEntry) async -> Void = { _ in },
+        onEntry: @escaping @Sendable (_ entry: IFEvalResponseEntry, _ isError: Bool) async -> Void = { _, _ in },
         emit: @escaping @Sendable (_ workerSlot: Int, _ testCase: IFEvalCase) async throws -> String
     ) async -> GenerateResult {
         let remaining = cases.filter { !completedKeys.contains($0.key) }
@@ -140,11 +147,11 @@ public extension IFEvalLane {
                             entry = IFEvalResponseEntry(key: testCase.key, response: "")
                             onProgress(
                                 "  [\(index + 1)/\(remaining.count)] \(testCase.key): "
-                                + "ERROR \(error) — recorded empty"
+                                + "ERROR \(error) — not persisted, eligible for retry on next run"
                             )
                         }
                         await collector.record(entry, isError: isError)
-                        await onEntry(entry)
+                        await onEntry(entry, isError)
                     }
                 }
             }
