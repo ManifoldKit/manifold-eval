@@ -50,6 +50,14 @@ let package = Package(
             dependencies: [
                 "ManifoldEval",
                 .product(name: "ManifoldTools", package: "ManifoldKit"),
+                // Only the executable links a concrete backend family — the
+                // `ManifoldEval` library stays backend-agnostic (BFCLLane's
+                // `emit` seam takes tool calls from any source). `bfcl-generate`
+                // is the one command that needs to actually drive a live model,
+                // so ManifoldOllama is scoped here, mirroring how ManifoldKit's
+                // own `manifold-tools` executable links `ManifoldOllama` while
+                // the backend-free `BFCLRunner` logic stays in `ManifoldTools`.
+                .product(name: "ManifoldOllama", package: "ManifoldKit"),
             ]
         ),
         .testTarget(
@@ -62,6 +70,13 @@ let package = Package(
                 // @testable import for DiffCommand's argv-parsing tests — no network I/O
                 // is exercised (parseArguments is pure), so this stays hermetic.
                 "manifold-eval",
+                // Only used by the RUN_OLLAMA_LIVE=1-gated BFCLGenerateLiveTests,
+                // which drives the real production tool-injection path
+                // (InferenceService + OllamaBackend + BFCLRunner) end-to-end —
+                // a stronger proof than a synthetic emit closure. Test-only; the
+                // ManifoldEval library itself stays backend-agnostic.
+                .product(name: "ManifoldOllama", package: "ManifoldKit"),
+                .product(name: "ManifoldTools", package: "ManifoldKit"),
             ],
             resources: [.copy("Fixtures")]
         ),

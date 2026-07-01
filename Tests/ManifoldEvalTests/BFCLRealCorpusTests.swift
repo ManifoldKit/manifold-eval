@@ -188,4 +188,47 @@ final class BFCLRealCorpusTests: XCTestCase {
         XCTAssertEqual(firstSimple.total, secondSimple.total,
                        "cache reuse must produce the same case count on repeated loads")
     }
+
+    // MARK: - cliRun against the Gorilla cache (the `bfcl --gorilla-cache-dir` CLI path)
+
+    /// Verifies ``BFCLLane/cliRun(corpusSource:responsesURL:)`` — the general
+    /// overload `bfcl --gorilla-cache-dir` uses — works against the real Gorilla
+    /// cache, not just the `.localDirectory` fixture path
+    /// ``CLILaneRunnerSmokeTests`` already covers.
+    ///
+    /// This is what makes a `bfcl-generate` full-corpus run actually scoreable
+    /// via the CLI: both commands must resolve the SAME corpus source.
+    func testCliRunAgainstGorillaCache() async throws {
+        let cacheDir = gorillaCacheDir()
+        guard isCachePopulated(cacheDir) || allowNetworkDownload() else {
+            throw XCTSkip(
+                "BFCL Gorilla v4 corpus not cached. "
+                + "Run `scripts/fetch-corpora.sh` or set RUN_BFCL_GORILLA=1."
+            )
+        }
+
+        // Empty responses file — deterministic, no live model needed. Mirrors
+        // testRealCorpusLoadsAndCountsMatch's no-op-emit expectations.
+        let responsesURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("bfcl-gorilla-cliRun-\(UUID().uuidString).jsonl")
+        try "".write(to: responsesURL, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: responsesURL) }
+
+        let lane = BFCLLane()
+        let (result, markdown) = try await lane.cliRun(
+            corpusSource: .gorilla(cacheDir: cacheDir),
+            responsesURL: responsesURL
+        )
+
+        XCTAssertTrue(result.fullCorpusSourced)
+        let skipped = result.categoryResults.filter(\.skipped)
+        XCTAssertTrue(skipped.isEmpty, "no category should be skipped — skipped: \(skipped.map(\.category.rawValue))")
+
+        let irrelevance = try XCTUnwrap(result.categoryResults.first { $0.category == .irrelevance })
+        XCTAssertEqual(irrelevance.passed, irrelevance.total,
+                       "irrelevance should pass 100% with no calls emitted (empty responses file)")
+
+        XCTAssertGreaterThanOrEqual(result.overallTotal, Int(Double(GorillaV4.totalCases) * 0.95))
+        XCTAssert(markdown.contains("Full Gorilla corpus"))
+    }
 }

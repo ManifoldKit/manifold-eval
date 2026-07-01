@@ -6,14 +6,20 @@ import ManifoldEval
 /// Usage:
 ///
 ///     manifold-eval bfcl --corpus <dir> --responses <jsonl-file> [--out <report.md>]
+///     manifold-eval bfcl --gorilla-cache-dir <dir> --responses <jsonl-file> [--out <report.md>]
 ///
-/// `--corpus`   Directory containing BFCL fixture files
-///              (`<category>_questions.jsonl`, `<category>_answers.jsonl`).
-/// `--responses` Path to a tool-calls JSONL file; each line:
-///              `{"id":"<case-id>","calls":[{"id":"...","toolName":"...","arguments":"..."},...]}`.
-///              Cases absent from the file are scored with an empty call list
-///              (irrelevance passes; all other categories count as failed).
-/// `--out`      Write the Markdown report to this file instead of stdout.
+/// `--corpus`            Directory containing flat BFCL fixture files
+///                       (`<category>_questions.jsonl`, `<category>_answers.jsonl`).
+/// `--gorilla-cache-dir` Alternative to `--corpus`: a Gorilla v4 cache directory as
+///                       produced by `bfcl-generate --cache-dir` / `scripts/fetch-corpora.sh`
+///                       (`<dir>/data/BFCL_v4_*.json` + `<dir>/data/possible_answer/`).
+///                       Use this to score a `bfcl-generate` full-corpus run directly —
+///                       both commands then load cases through the same corpus loader.
+/// `--responses`         Path to a tool-calls JSONL file; each line:
+///                       `{"id":"<case-id>","calls":[{"id":"...","toolName":"...","arguments":"..."},...]}`.
+///                       Cases absent from the file are scored with an empty call list
+///                       (irrelevance passes; all other categories count as failed).
+/// `--out`               Write the Markdown report to this file instead of stdout.
 enum BFCLCommand {
 
     static func run(
@@ -22,6 +28,7 @@ enum BFCLCommand {
         warn: (String) -> Void
     ) async {
         var corpusPath: String?
+        var gorillaCacheDirPath: String?
         var responsesPath: String?
         var outPath: String?
 
@@ -35,9 +42,10 @@ enum BFCLCommand {
         while index < args.count {
             let token = args[index]
             switch token {
-            case "--corpus":    corpusPath    = value(&index, token)
-            case "--responses": responsesPath = value(&index, token)
-            case "--out":       outPath        = value(&index, token)
+            case "--corpus":            corpusPath          = value(&index, token)
+            case "--gorilla-cache-dir": gorillaCacheDirPath = value(&index, token)
+            case "--responses":         responsesPath       = value(&index, token)
+            case "--out":               outPath             = value(&index, token)
             default:
                 if token.hasPrefix("--") { die("unknown flag '\(token)'", 2) }
                 die("unexpected argument '\(token)' — expected a flag", 2)
@@ -45,7 +53,9 @@ enum BFCLCommand {
             index += 1
         }
 
-        guard let corpusPath else { die("bfcl requires --corpus <dir>", 2) }
+        guard (corpusPath == nil) != (gorillaCacheDirPath == nil) else {
+            die("bfcl requires exactly one of --corpus <dir> or --gorilla-cache-dir <dir>", 2)
+        }
         guard let responsesPath else {
             die(
                 "bfcl requires --responses <jsonl-file>\n"
@@ -55,14 +65,23 @@ enum BFCLCommand {
             )
         }
 
-        let corpusDir    = URL(fileURLWithPath: corpusPath)
+        let corpusSource: BFCLLane.CorpusSource
+        if let corpusPath {
+            corpusSource = .localDirectory(URL(fileURLWithPath: corpusPath))
+        } else if let gorillaCacheDirPath {
+            corpusSource = .gorilla(cacheDir: URL(fileURLWithPath: (gorillaCacheDirPath as NSString).expandingTildeInPath))
+        } else {
+            // Unreachable given the XOR validation above, but the compiler can't
+            // prove it — fail loudly rather than force-unwrap.
+            die("internal: no corpus source resolved", 1)
+        }
         let responsesURL = URL(fileURLWithPath: responsesPath)
 
         let lane = BFCLLane()
         let result: BFCLLane.LaneResult
         let markdown: String
         do {
-            (result, markdown) = try await lane.cliRun(corpusDir: corpusDir, responsesURL: responsesURL)
+            (result, markdown) = try await lane.cliRun(corpusSource: corpusSource, responsesURL: responsesURL)
         } catch {
             die("bfcl: \(error)", 1)
         }
