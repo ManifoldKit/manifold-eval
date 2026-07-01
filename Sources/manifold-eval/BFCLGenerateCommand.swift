@@ -41,7 +41,7 @@ enum BFCLGenerateCommand {
         var categoryArg = "multiple"
         var ollamaURLString = "http://localhost:11434"
         var cacheDirPath = "~/.cache/manifold-eval/bfcl"
-        var outPath: String?
+        var rawOutPath: String?
         var timeoutSeconds: Double = 120
 
         func value(_ index: inout Int, _ flag: String) -> String {
@@ -63,7 +63,7 @@ enum BFCLGenerateCommand {
             case "--cache-dir":
                 cacheDirPath = value(&index, token)
             case "--out":
-                outPath = value(&index, token)
+                rawOutPath = value(&index, token)
             case "--timeout":
                 let raw = value(&index, token)
                 guard let t = Double(raw), t > 0 else {
@@ -78,7 +78,10 @@ enum BFCLGenerateCommand {
         }
 
         guard let ollamaModel else { die("bfcl-generate requires --ollama-model <tag>", 2) }
-        guard let outPath else { die("bfcl-generate requires --out <responses.jsonl>", 2) }
+        guard let rawOutPath else { die("bfcl-generate requires --out <responses.jsonl>", 2) }
+        // Expand `~` the same way --cache-dir does, so `--out ~/foo.jsonl` works
+        // instead of failing with a confusing "cannot open for writing" error.
+        let outPath = (rawOutPath as NSString).expandingTildeInPath
 
         let categories: [BFCLCategory]
         do {
@@ -129,7 +132,13 @@ enum BFCLGenerateCommand {
               let fileHandle = FileHandle(forWritingAtPath: outPath) else {
             die("bfcl-generate: cannot open '\(outPath)' for writing", 1)
         }
-        defer { try? fileHandle.close() }
+        defer {
+            do {
+                try fileHandle.close()
+            } catch {
+                warn("bfcl-generate: failed to close '\(outPath)' cleanly: \(error)")
+            }
+        }
         let encoder = JSONEncoder()
 
         // `emit` below is `@Sendable`; a captured `var` can't cross into
