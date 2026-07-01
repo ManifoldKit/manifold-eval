@@ -72,10 +72,17 @@ final class DifferentialRunnerIntegrationTests: XCTestCase {
         let prompt = try writePrompt("2 + 2 =")
 
         let driver = LlamaRunnerDriver(command: Self.shellQuotePath(stub.path))
+        // Non-default topK/repeatPenalty (not the SamplerConfig defaults of 0/1.0)
+        // so this assertion is meaningful: with the defaults, `--top-k 0
+        // --repeat-penalty 1.0` would appear in argv even if the driver silently
+        // never appended the flags and the stub's own quoting happened to match —
+        // this is exactly the class of "recorded but never forwarded" bug an
+        // independent reviewer caught in the original PR #13 (topK/repeatPenalty
+        // reached OllamaRawDriver but not LlamaRunnerDriver).
         let raw = try await driver.run(
             modelArg: "/models/x.gguf",
             promptFile: prompt,
-            sampler: SamplerConfig(temperature: 0, seed: 7, maxTokens: 64),
+            sampler: SamplerConfig(temperature: 0, seed: 7, topK: 40, repeatPenalty: 1.1, maxTokens: 64),
             repeatIndex: 2
         )
 
@@ -91,6 +98,8 @@ final class DifferentialRunnerIntegrationTests: XCTestCase {
         XCTAssertTrue(received.contains("--temperature 0.0"), "got: \(received)")
         XCTAssertTrue(received.contains("--seed 7"), "got: \(received)")
         XCTAssertTrue(received.contains("--max-tokens 64"), "got: \(received)")
+        XCTAssertTrue(received.contains("--top-k 40"), "got: \(received)")
+        XCTAssertTrue(received.contains("--repeat-penalty 1.1"), "got: \(received)")
         XCTAssertTrue(received.contains("--repeat-index 2"), "got: \(received)")
     }
 

@@ -113,7 +113,8 @@ swift run manifold-eval diff --model mistral:7b-instruct \
 
 # force-match both legs' sampler when debugging a divergence (defaults: top-k
 # disabled, repeat-penalty a no-op — both legs already agree on these unless
-# overridden):
+# overridden). Both flags reach the Ollama leg AND, when --llama-runner is
+# passed, the external runner's own --top-k/--repeat-penalty flags:
 swift run manifold-eval diff --model mistral:7b-instruct \
     --prompt-file probe.txt --top-k 0 --repeat-penalty 1.0 --out DIVERGENCE.md
 ```

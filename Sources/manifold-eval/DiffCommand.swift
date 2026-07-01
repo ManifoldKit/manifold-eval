@@ -159,7 +159,11 @@ enum DiffCommand {
         // can explicitly force-match both legs' sampler config instead of being
         // stuck with the hardcoded neutral defaults (topK=0 "disabled",
         // repeatPenalty=1.0 "no-op") — see OllamaRawDriver's doc comments for why
-        // these matter the moment either leg runs above temperature 0.
+        // these matter the moment either leg runs above temperature 0. Both
+        // values reach BOTH legs: OllamaRawDriver's request body, and (as of a
+        // PR #13 follow-up) LlamaRunnerDriver's `--top-k`/`--repeat-penalty`
+        // flags to the external runner — see LlamaRunnerDriver's doc comment for
+        // the invocation contract.
         let sampler = SamplerConfig(
             temperature: temperature,
             seed: seed,
