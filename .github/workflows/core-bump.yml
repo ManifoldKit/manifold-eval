@@ -77,8 +77,10 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
           # PAT so the eventual merge push is admin-authored, matching the
-          # companion packages' pattern (see comment above).
-          token: ${{ secrets.RELEASE_AUTOMERGE_TOKEN }}
+          # companion packages' pattern (see comment above). Falls back to the
+          # workflow token when the secret is not provisioned so the no-op and
+          # gate paths still run; auto-merge then degrades to leave-PR-open.
+          token: ${{ secrets.RELEASE_AUTOMERGE_TOKEN || github.token }}
 
       - name: Rewrite ManifoldKit pin
         id: edit
@@ -110,7 +112,8 @@ jobs:
       - name: Open and merge bump PR
         if: steps.edit.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_AUTOMERGE_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_AUTOMERGE_TOKEN || github.token }}
+          HAS_AUTOMERGE_PAT: ${{ secrets.RELEASE_AUTOMERGE_TOKEN != '' }}
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
@@ -126,7 +129,11 @@ jobs:
             --body "Automated: ManifoldKit ${TAG} shipped. Pin re-resolved, built, and tested green against the new core." \
             --head "$BRANCH" --base main)
           echo "Opened $PR_URL"
-          # Inline gate already ran the identical suite; admin-merge past the
-          # redundant required check (enforce_admins is off on main).
-          gh pr merge "$PR_URL" --squash --admin --delete-branch
-          echo "Merged $PR_URL"
+          if [ "$HAS_AUTOMERGE_PAT" = "true" ]; then
+            # Inline gate already ran the identical suite; admin-merge past the
+            # redundant required check (enforce_admins is off on main).
+            gh pr merge "$PR_URL" --squash --admin --delete-branch
+            echo "Merged $PR_URL"
+          else
+            echo "::warning::RELEASE_AUTOMERGE_TOKEN is not provisioned in this repo — bump PR left open for manual merge: ${PR_URL}. Note: a PR pushed with the workflow token does not trigger CI; the inline gate above already ran the same build+test."
+          fi
