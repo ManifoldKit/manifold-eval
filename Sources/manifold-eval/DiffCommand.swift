@@ -24,6 +24,8 @@ enum DiffCommand {
         var seed = 0
         var maxTokens = 128
         var temperature = 0.0
+        var topK = 0
+        var repeatPenalty = 1.0
         var bosID: Int?
         var cohort: Cohort?
         var ollamaURLString = "http://localhost:11434"
@@ -58,6 +60,11 @@ enum DiffCommand {
                 let raw = value(&index, token)
                 guard let d = Double(raw) else { die("--temperature requires a number, got '\(raw)'", 2) }
                 temperature = d
+            case "--top-k": topK = intValue(&index, token)
+            case "--repeat-penalty":
+                let raw = value(&index, token)
+                guard let d = Double(raw) else { die("--repeat-penalty requires a number, got '\(raw)'", 2) }
+                repeatPenalty = d
             case "--bos": bosID = intValue(&index, token)
             case "--cohort":
                 let raw = value(&index, token)
@@ -116,7 +123,18 @@ enum DiffCommand {
         }
 
         // --- Build the harness ---
-        let sampler = SamplerConfig(temperature: temperature, seed: seed, maxTokens: maxTokens)
+        // topK / repeatPenalty are exposed so an operator debugging a divergence
+        // can explicitly force-match both legs' sampler config instead of being
+        // stuck with the hardcoded neutral defaults (topK=0 "disabled",
+        // repeatPenalty=1.0 "no-op") — see OllamaRawDriver's doc comments for why
+        // these matter the moment either leg runs above temperature 0.
+        let sampler = SamplerConfig(
+            temperature: temperature,
+            seed: seed,
+            topK: topK,
+            repeatPenalty: repeatPenalty,
+            maxTokens: maxTokens
+        )
         let bos: BOSNormalization = bosID.map { .explicit(bosID: $0) } ?? .autoDetect
 
         // Best-effort Ollama version for the tooling record — a failure here is a
@@ -180,6 +198,11 @@ enum DiffCommand {
         //        back VARIANT (the control itself failed — N3)
         //   3 = indeterminate — a leg's determinism was never assessed; rerun with
         //       more --repeats (neither a clean pass nor a confirmed divergence)
+        //   4 = degenerateRepetitionLengthMismatch — both outputs are the same
+        //       repeating unit at different lengths, a stopping-length artifact.
+        //       Non-zero (worth a look — why did the lengths differ?) but
+        //       deliberately distinct from 1 so a script can tell "same content,
+        //       different repeat count" apart from a genuine content divergence.
         guard let divergence = outcome.comparison?.divergence else {
             // Ollama-only run: no cross-backend comparison, just the determinism
             // control. A VARIANT control (assessed but not reproducible) is itself a
@@ -195,6 +218,8 @@ enum DiffCommand {
             exit(1)
         case .indeterminate:
             exit(3)
+        case .degenerateRepetitionLengthMismatch:
+            exit(4)
         case .identical, .samplerNondeterminism:
             exit(0)
         }

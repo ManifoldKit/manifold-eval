@@ -29,7 +29,7 @@ guard let subcommand = arguments.first else {
     print("  manifold-eval collate <record.json>... [--out PATH] [--title T]")
     print("  manifold-eval diff --model <ollama-tag> (--prompt-file P | --messages-file M --template-gguf G)")
     print("                     [--llama-runner CMD] [--llama-model GGUF] [--repeats N] [--seed N]")
-    print("                     [--max-tokens N] [--temperature D] [--bos ID]")
+    print("                     [--max-tokens N] [--temperature D] [--top-k N] [--repeat-penalty D] [--bos ID]")
     print("                     [--cohort sameWeights|sameFamily|cloud] [--ollama-url URL]")
     print("                     [--core-commit SHA] [--out DIVERGENCE.md]")
     print("  manifold-eval ifeval --corpus <path> --responses <jsonl> [--out PATH]")

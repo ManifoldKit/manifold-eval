@@ -30,8 +30,18 @@ public enum Divergence: String, Sendable, Equatable, Codable {
     /// — fewer than two repeats, so reproducibility is unknown. NOT a clean pass and
     /// NOT a confirmed divergence: rerun with more `--repeats` to resolve it.
     case indeterminate
+    /// Same prompt, both backends reproducible, same input tokens, same sampler,
+    /// outputs differ — but both outputs are each a degenerate repetition of the
+    /// exact same short unit, differing only in how many times it repeated
+    /// before each backend's own stopping criterion fired (see
+    /// ``DegenerateRepetition``). Proven overnight (2026-06-30): the same GGUF
+    /// produced the identical repeating line on Ollama and llama.cpp — 8 reps vs
+    /// 3. A stopping-length artifact, not a content difference: real, but a
+    /// distinct (lesser) alarm than ``genuineDivergence``.
+    case degenerateRepetitionLengthMismatch
     /// Same prompt, both backends reproducible, same input tokens, same sampler —
-    /// and the outputs still differ. The only state worth a human: a genuine
+    /// and the outputs still differ, and they are NOT the same repeating unit at
+    /// different lengths. The only state worth a human: a genuine
     /// runtime/renderer/model difference, every confound stripped.
     case genuineDivergence
 }
@@ -71,8 +81,15 @@ public enum DivergenceTriage {
     /// 6. **indeterminate** — outputs differ (or match), tokens + sampler agree, no
     ///    observed nondeterminism, but a leg's determinism was never assessed (< 2
     ///    repeats). Neither pass nor finding — rerun with more repeats.
-    /// 7. **genuineDivergence** — outputs differ, every confound stripped and both
-    ///    legs assessed-reproducible. Residual signal worth a human.
+    /// 7. **degenerateRepetitionLengthMismatch** — every confound above stripped,
+    ///    outputs still differ, BUT both outputs independently reduce to the same
+    ///    short repeating unit (``DegenerateRepetition``) — they differ only in
+    ///    repeat count, not in repeated content. A stopping-length artifact, not
+    ///    a model/output difference; checked before (and instead of) 8 so it
+    ///    never gets diluted into the single "worth a human" bucket.
+    /// 8. **genuineDivergence** — outputs differ, every confound stripped, both
+    ///    legs assessed-reproducible, and NOT a same-unit repetition-length
+    ///    mismatch. Residual signal worth a human.
     ///
     /// - Parameters:
     ///   - aIsDeterministic / bIsDeterministic: whether each leg produced an
@@ -132,7 +149,16 @@ public enum DivergenceTriage {
             return .indeterminate
         }
 
-        // 7. Every confound stripped — a genuine divergence.
+        // 7. Every confound stripped, outputs still differ — but if both sides
+        //    are the same short unit repeated a different number of times, it's
+        //    a stopping-length artifact, not a content difference (S7 — the
+        //    overnight 2026-06-30 false-positive repro: Ollama vs llama.cpp,
+        //    identical repeating line, 8 reps vs 3).
+        if DegenerateRepetition.isRepetitionLengthMismatch(a.output, b.output) {
+            return .degenerateRepetitionLengthMismatch
+        }
+
+        // 8. Every confound stripped — a genuine divergence.
         return .genuineDivergence
     }
 
