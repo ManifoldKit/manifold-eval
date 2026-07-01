@@ -170,6 +170,127 @@ final class DifferentialTriageTests: XCTestCase {
         XCTAssertEqual(DivergenceTriage.classify(a, b, aIsDeterministic: true, bIsDeterministic: true), .genuineDivergence)
     }
 
+    // MARK: - S7: degenerate repetition length mismatch (overnight 2026-06-30 repro)
+
+    func testDegenerateRepetitionLengthMismatch() {
+        // The concrete overnight false positive: same GGUF, both backends
+        // deterministic, identical repeating line, only the repeat COUNT
+        // differs (Ollama 8x, llama.cpp 3x). Must NOT read as genuineDivergence.
+        let unit = " The answer is in French.\n"
+        let a = run(backend: "ollama", promptSha: "p", output: String(repeating: unit, count: 8))
+        let b = run(backend: "llama.cpp", promptSha: "p", output: String(repeating: unit, count: 3))
+        XCTAssertEqual(
+            DivergenceTriage.classify(a, b, aIsDeterministic: true, bIsDeterministic: true),
+            .degenerateRepetitionLengthMismatch
+        )
+    }
+
+    func testDegenerateRepetitionToleratesPartialFinalRepeat() {
+        // A generation cut short mid-unit by a token/length cap still counts as
+        // the same repeating pattern.
+        let unit = "Paris. "
+        let a = run(promptSha: "p", output: String(repeating: unit, count: 5))
+        let b = run(promptSha: "p", output: String(repeating: unit, count: 2) + "Par")
+        XCTAssertEqual(
+            DivergenceTriage.classify(a, b, aIsDeterministic: true, bIsDeterministic: true),
+            .degenerateRepetitionLengthMismatch
+        )
+    }
+
+    func testDifferentRepeatingUnitsAreStillGenuineDivergence() {
+        // Both outputs are degenerate repetitions, but of DIFFERENT content — a
+        // real content difference, not merely a stopping-length artifact.
+        let a = run(promptSha: "p", output: String(repeating: "apple ", count: 5))
+        let b = run(promptSha: "p", output: String(repeating: "orange ", count: 5))
+        XCTAssertEqual(
+            DivergenceTriage.classify(a, b, aIsDeterministic: true, bIsDeterministic: true),
+            .genuineDivergence
+        )
+    }
+
+    func testNonRepeatingOutputsAreStillGenuineDivergence() {
+        // Neither output is degenerate at all — must fall through to the
+        // ordinary genuineDivergence bucket, unaffected by the new check.
+        let a = run(promptSha: "p", output: "The capital of France is Paris.")
+        let b = run(promptSha: "p", output: "The capital of France is Lyon, actually.")
+        XCTAssertEqual(
+            DivergenceTriage.classify(a, b, aIsDeterministic: true, bIsDeterministic: true),
+            .genuineDivergence
+        )
+    }
+
+    func testPromptDivergenceOutranksDegenerateRepetitionShape() {
+        // Cascade ordering: even when both outputs share a repeating unit, a
+        // failed same-bytes control must still win — the comparison itself is
+        // invalid, so no downstream refinement (including this one) applies.
+        let unit = "loop "
+        let a = run(promptSha: "p1", output: String(repeating: unit, count: 8))
+        let b = run(promptSha: "p2", output: String(repeating: unit, count: 3))
+        XCTAssertEqual(
+            DivergenceTriage.classify(a, b, aIsDeterministic: true, bIsDeterministic: true),
+            .promptDivergence
+        )
+    }
+
+    func testSamplerMismatchOutranksDegenerateRepetitionShape() {
+        // Cascade ordering: an unequal sampler still explains the difference
+        // before the repetition-shape refinement is ever consulted.
+        let unit = "loop "
+        let a = run(promptSha: "p", output: String(repeating: unit, count: 8), sampler: SamplerConfig(temperature: 0.0))
+        let b = run(promptSha: "p", output: String(repeating: unit, count: 3), sampler: SamplerConfig(temperature: 0.7))
+        XCTAssertEqual(
+            DivergenceTriage.classify(a, b, aIsDeterministic: true, bIsDeterministic: true),
+            .samplerMismatch
+        )
+    }
+
+    func testIndeterminateOutranksDegenerateRepetitionShape() {
+        // Cascade ordering: an unassessed leg still yields indeterminate before
+        // the repetition-shape refinement is consulted.
+        let unit = "loop "
+        let a = run(promptSha: "p", output: String(repeating: unit, count: 8))
+        let b = run(promptSha: "p", output: String(repeating: unit, count: 3))
+        XCTAssertEqual(
+            DivergenceTriage.classify(a, b, aIsDeterministic: true, bIsDeterministic: true,
+                                      aWasAssessed: false, bWasAssessed: true),
+            .indeterminate
+        )
+    }
+
+    // MARK: - DegenerateRepetition (unit-level)
+
+    func testRepeatingUnitFindsShortestPeriod() {
+        XCTAssertEqual(DegenerateRepetition.repeatingUnit(of: "abcabcabc"), "abc")
+        XCTAssertEqual(DegenerateRepetition.repeatingUnit(of: "aaaaaa"), "a")
+    }
+
+    func testRepeatingUnitAllowsPartialFinalRepeat() {
+        XCTAssertEqual(DegenerateRepetition.repeatingUnit(of: "abcabcab"), "abc")
+    }
+
+    func testRepeatingUnitNilForNonRepeatingText() {
+        XCTAssertNil(DegenerateRepetition.repeatingUnit(of: "The capital of France is Paris."))
+        XCTAssertNil(DegenerateRepetition.repeatingUnit(of: "AAAB"))
+    }
+
+    func testRepeatingUnitNilForTextTooShortToRepeatTwice() {
+        XCTAssertNil(DegenerateRepetition.repeatingUnit(of: ""))
+        XCTAssertNil(DegenerateRepetition.repeatingUnit(of: "x"))
+        XCTAssertNil(DegenerateRepetition.repeatingUnit(of: "ab"), "a period must repeat at least twice")
+    }
+
+    func testIsRepetitionLengthMismatchRequiresIdenticalUnit() {
+        XCTAssertTrue(DegenerateRepetition.isRepetitionLengthMismatch(
+            String(repeating: "ab", count: 5), String(repeating: "ab", count: 2)
+        ))
+        XCTAssertFalse(DegenerateRepetition.isRepetitionLengthMismatch(
+            String(repeating: "ab", count: 5), String(repeating: "cd", count: 5)
+        ))
+        XCTAssertFalse(DegenerateRepetition.isRepetitionLengthMismatch(
+            "The capital of France is Paris.", "The capital of France is Lyon."
+        ))
+    }
+
     // MARK: - S2/S3: indeterminate + identical-gating
 
     func testIndeterminateWhenOutputsDifferAndLegUnassessed() {
