@@ -17,6 +17,8 @@ import ManifoldTools
 //   manifold-eval mteb    --dataset <path-or-fixture> [--ollama-model <tag>] [--out PATH]
 //   manifold-eval regress --backend ollama|llama --baseline-model M --redriven-model M
 //                         --prompt-file P --expected REF [options…]
+//   manifold-eval baseline <record.json>... --baseline-path PATH [--update]
+//                         [--score-threshold D] [--max-age-hours N] [--out PATH]
 
 func die(_ message: String, code: Int32) -> Never {
     FileHandle.standardError.write(Data("error: \(message)\n".utf8))
@@ -47,6 +49,8 @@ guard let subcommand = arguments.first else {
     print("                     --prompt-file P --expected REF [--scorer contains|exact] [--ignore-case]")
     print("                     [--threshold D] [--seed N] [--max-tokens N] [--temperature D]")
     print("                     [--llama-runner CMD] [--ollama-url URL] [--core-commit SHA] [--out REGRESSION.md]")
+    print("  manifold-eval baseline <record.json>... --baseline-path PATH [--update]")
+    print("                     [--score-threshold D] [--max-age-hours N] [--out PATH]")
     exit(2)
 }
 
@@ -144,6 +148,11 @@ case "regress":
     // RegressCommand; the gate/runner/report it drives live in ManifoldEval/Replay.
     await RegressCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
+case "baseline":
+    // The rot-guard entry point (issue #22): diffs a run's ConformanceRecords
+    // against a persisted per-cell baseline, or writes one with --update.
+    BaselineCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+
 default:
-    die("unknown subcommand '\(subcommand)' (expected: collate, diff, ifeval, ifeval-generate, bfcl, bfcl-generate, mteb, regress)", code: 2)
+    die("unknown subcommand '\(subcommand)' (expected: collate, diff, ifeval, ifeval-generate, bfcl, bfcl-generate, mteb, regress, baseline)", code: 2)
 }
