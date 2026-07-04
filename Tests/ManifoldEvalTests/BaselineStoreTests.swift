@@ -129,6 +129,102 @@ final class BaselineStoreTests: XCTestCase {
         }
     }
 
+    // MARK: - Load-path trust-boundary guards
+
+    /// A hand-edited (or merge-conflict-concatenated) baseline file with two
+    /// rows sharing the same `CellKey` must never reach `byKey`'s
+    /// `Dictionary(uniqueKeysWithValues:)` — that traps the process. Loading
+    /// must throw a handled, named error instead.
+    func testLoadRejectsDuplicateCellKeyInsteadOfCrashing() throws {
+        let duplicated = key()
+        let entryA = BaselineEntry(score: 0.9, bytesHash: "aaa", divergenceClass: "pass", timestamp: Date(timeIntervalSince1970: 1), coreCommit: "4461529f")
+        let entryB = BaselineEntry(score: 0.4, bytesHash: "bbb", divergenceClass: "fail", timestamp: Date(timeIntervalSince1970: 2), coreCommit: "4461529f")
+
+        // Hand-construct the on-disk JSON array directly — going through
+        // `BaselineStore(rows:)` would sort but not de-dupe, mirroring what a
+        // hand-edited or merge-conflict-concatenated file would contain.
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let rowsJSON = try encoder.encode([
+            BaselineRow(key: duplicated, entry: entryA),
+            BaselineRow(key: duplicated, entry: entryB),
+        ])
+
+        let path = scratchPath()
+        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try rowsJSON.write(to: path)
+
+        XCTAssertThrowsError(try BaselineStore.load(path: path)) { error in
+            guard case BaselineStore.LoadError.duplicateCellKey(let offendingKey) = error else {
+                return XCTFail("expected duplicateCellKey, got \(error)")
+            }
+            XCTAssertEqual(offendingKey, duplicated)
+        }
+
+        // sabotage (verified by hand, then reverted): removing the `validate`
+        // call in `BaselineStore.load(path:)` makes this test fail because the
+        // load succeeds instead of throwing (and any subsequent `.byKey` access
+        // on the loaded store traps the process instead).
+    }
+
+    /// A single baseline file whose rows span more than one `coreCommit` is
+    /// internally incomparable — the load-path analog of `Collator`'s /
+    /// `BaselineCollector.build`'s same-commit guard over a *run's* records.
+    func testLoadRejectsBaselineFileSpanningMultipleCoreCommits() throws {
+        let entryA = BaselineEntry(score: 0.9, bytesHash: "aaa", divergenceClass: "pass", timestamp: Date(timeIntervalSince1970: 1), coreCommit: "aaaa")
+        let entryB = BaselineEntry(score: 0.4, bytesHash: "bbb", divergenceClass: "fail", timestamp: Date(timeIntervalSince1970: 2), coreCommit: "bbbb")
+
+        let store = BaselineStore(rows: [
+            BaselineRow(key: key(model: "model-a"), entry: entryA),
+            BaselineRow(key: key(model: "model-b"), entry: entryB),
+        ])
+
+        let path = scratchPath()
+        try store.save(path: path)
+
+        XCTAssertThrowsError(try BaselineStore.load(path: path)) { error in
+            guard case BaselineStore.LoadError.mixedCoreCommits(let commits) = error else {
+                return XCTFail("expected mixedCoreCommits, got \(error)")
+            }
+            XCTAssertEqual(commits, ["aaaa", "bbbb"])
+        }
+
+        // sabotage (verified by hand, then reverted): removing the commit-count
+        // check in `validate(_:)` makes this test fail because the load
+        // succeeds instead of throwing.
+    }
+
+    /// The whole point of the rot-guard loop: a baseline recorded against core
+    /// commit A must still compare cleanly against a *current run* at core
+    /// commit B (a `core-bump` moved the pin between cycles). The internal
+    /// single-file guard above must never be confused with — or accidentally
+    /// extended to reject — this baseline-vs-current cross-commit case.
+    func testBaselineAtOneCommitVsCurrentRunAtDifferentCommitStillComparesCleanly() throws {
+        let baselineManifest = try BaselineCollector.build(from: [record(f1: 0.9, coreCommit: "aaaa")])
+        let baseline = BaselineStore.empty.updated(with: baselineManifest.observations, timestamp: Date(timeIntervalSince1970: 1))
+
+        let path = scratchPath()
+        try baseline.save(path: path)
+        let reloaded = try BaselineStore.load(path: path) // must not throw — single-commit file
+
+        let currentManifest = try BaselineCollector.build(from: [record(f1: 0.5, coreCommit: "bbbb")])
+        let changes = BaselineRotGuard.detectMovements(
+            current: currentManifest.observations, baseline: reloaded, scoreThreshold: 0.05
+        )
+
+        XCTAssertEqual(changes.count, 1, "a baseline@commitA vs current@commitB diff must still report movement — that comparison is the entire point of the loop")
+        guard case .scoreChanged(let previous, let current, _)? = changes.first?.movements.first(where: {
+            if case .scoreChanged = $0 { return true } else { return false }
+        }) else { return XCTFail("expected a scoreChanged movement") }
+        XCTAssertEqual(previous, 0.9)
+        XCTAssertEqual(current, 0.5)
+
+        // sabotage: asserting this throws, or asserting no movement, should fail
+        // — both would indicate the internal single-file guard had regressed
+        // into rejecting cross-commit baseline-vs-current comparisons.
+        // XCTAssertTrue(changes.isEmpty)
+    }
+
     // MARK: - Movement detection
 
     func testScoreChangeBeyondThresholdIsDetected() throws {

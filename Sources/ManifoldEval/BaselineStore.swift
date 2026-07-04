@@ -155,6 +155,18 @@ public struct BaselineStore: Codable, Sendable, Equatable {
     public enum LoadError: Error, CustomStringConvertible, Equatable {
         case unreadable(path: String, reason: String)
         case undecodable(path: String, reason: String)
+        /// The decoded file contains more than one row for the same `CellKey`.
+        /// A baseline file is a trust boundary (hand-edited, or the product of a
+        /// merge-conflict concatenation), so this must be a handled rejection —
+        /// never a silent de-dupe, and never the `Dictionary(uniqueKeysWithValues:)`
+        /// trap `byKey` would otherwise hit.
+        case duplicateCellKey(CellKey)
+        /// The decoded file's rows span more than one `coreCommit`. A single
+        /// baseline file is only meaningful as a snapshot of one core binary —
+        /// the direct analog of `Collator`'s (and `BaselineCollector.build`'s)
+        /// same guard over a *run's* records, applied here to a *loaded file*'s
+        /// own internal consistency.
+        case mixedCoreCommits(Set<String>)
 
         public var description: String {
             switch self {
@@ -162,6 +174,14 @@ public struct BaselineStore: Codable, Sendable, Equatable {
                 return "cannot read baseline file \(path): \(reason)"
             case .undecodable(let path, let reason):
                 return "cannot decode \(path) as a BaselineStore: \(reason)"
+            case .duplicateCellKey(let key):
+                return "baseline file contains duplicate rows for cell "
+                    + "\(key.model) / \(key.quant) / \(key.backend) / \(key.renderer) — "
+                    + "a baseline row must be unique per cell"
+            case .mixedCoreCommits(let commits):
+                return "baseline file spans \(commits.count) ManifoldKit core commits "
+                    + "(\(commits.sorted().joined(separator: ", "))) — a single baseline file must "
+                    + "come from one core binary; a mixed file is not internally comparable"
             }
         }
     }
@@ -176,12 +196,33 @@ public struct BaselineStore: Codable, Sendable, Equatable {
         } catch {
             throw LoadError.unreadable(path: path.path, reason: "\(error)")
         }
+        let store: BaselineStore
         do {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            return try decoder.decode(BaselineStore.self, from: data)
+            store = try decoder.decode(BaselineStore.self, from: data)
         } catch {
             throw LoadError.undecodable(path: path.path, reason: "\(error)")
+        }
+        try validate(store)
+        return store
+    }
+
+    /// Validates a decoded store's internal consistency before it is trusted by
+    /// any caller — the boundary that keeps `byKey`'s
+    /// `Dictionary(uniqueKeysWithValues:)` from ever seeing a duplicate key, and
+    /// keeps a mixed-commit file from being silently compared against.
+    private static func validate(_ store: BaselineStore) throws {
+        var seen: Set<CellKey> = []
+        for row in store.rows {
+            guard seen.insert(row.key).inserted else {
+                throw LoadError.duplicateCellKey(row.key)
+            }
+        }
+
+        let commits = Set(store.rows.map(\.entry.coreCommit))
+        if commits.count > 1 {
+            throw LoadError.mixedCoreCommits(commits)
         }
     }
 
