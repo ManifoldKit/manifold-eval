@@ -1,0 +1,45 @@
+name: rot-guard (weekly)
+
+# Weekly bit-rot backstop for the eval surface.
+#
+# WHY THIS EXISTS: an assurance repo that no one pushes to for weeks rots
+# silently — the runner image updates, a transitive dep resolves differently,
+# or the exact-pinned core lands a change that core-bump.yml's inline gate
+# missed. ci.yml only fires on a push/PR; this catches drift during the quiet
+# stretches (a mature eval surface goes months without churn — the same reason
+# ManifoldKit's fuzz harness runs weekly, not per-PR).
+#
+# SCOPE — deliberately TIER 1 ONLY (build + fixture-driven tests, no models,
+# no hardware). The credibility numbers (live BFCL/IFEval over Ollama, MTEB
+# embeddings, cross-quant `regress`) need a live Ollama daemon and multi-GB
+# GGUFs on Apple Silicon, which hosted runners do not have. That signal is the
+# on-demand LOCAL sweep (manifold-eval-overnight/orchestrate.sh) and is NOT
+# what a green badge here means. This job guards that the surface still
+# COMPILES and its fixture contracts still hold against the current core pin —
+# nothing more. Do not add live-model lanes here; they would flake or no-op.
+#
+# Mirrors ci.yml's invocation exactly (swift build --build-tests + swift test)
+# so a weekly red is directly comparable to a PR red.
+on:
+  schedule:
+    # Mondays 08:00 UTC — a quiet slot, well clear of weekday merge traffic.
+    - cron: "0 8 * * 1"
+  workflow_dispatch: {}
+
+concurrency:
+  group: rot-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: build/test only reads the tree.
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      - name: Build (incl. tests) against current core pin
+        run: swift build --build-tests
+      - name: Test (fixture-driven only)
+        run: swift test
