@@ -130,6 +130,41 @@ final class DismissalsLedgerTests: XCTestCase {
         XCTAssertEqual(loaded.entries, ledger.entries)
     }
 
+    /// Regression guard for the fractional-seconds codec fix: `testLedgerJSONRoundTripsStably`
+    /// above pins `now` to an exact whole-second epoch (`1_800_000_000`), and
+    /// `testLoadSaveRoundTripsThroughDisk` pre-rounds to a millisecond boundary —
+    /// neither carries genuine sub-millisecond jitter, so neither would fail if the
+    /// codec regressed to whole-second `.iso8601` truncation (both inputs already
+    /// sit on a boundary the truncation wouldn't disturb, or disturb detectably).
+    /// This test uses a raw, unrounded `Date()` — real sub-millisecond jitter
+    /// included — and asserts the round trip is stable to millisecond precision
+    /// (the codec's documented promise; ISO8601DateFormatter's fractional-seconds
+    /// option itself only carries 3 digits, so exact equality isn't the right bar).
+    /// A whole-second-truncating codec would drop up to ~1s here, far outside the
+    /// asserted tolerance, so this fails on a revert and passes with the fix.
+    func testGenuineSubMillisecondJitterSurvivesRoundTripAtMillisecondPrecision() throws {
+        var ledger = DismissalsLedger()
+        let now = Date()
+        let finding = DismissedFinding(cell: cell, signature: signature(for: "sub-millisecond jitter"))
+        ledger.record(finding, reason: "reason", recordedAt: now, ttl: 3600)
+
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("dismissals-submillis-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try ledger.save(to: url)
+        let reloaded = try DismissalsLedger.load(from: url)
+
+        guard let reloadedEntry = reloaded.entries.first(where: { $0.finding == finding }) else {
+            return XCTFail("expected the recorded finding to round-trip")
+        }
+        XCTAssertEqual(
+            reloadedEntry.recordedAt.timeIntervalSince1970,
+            now.timeIntervalSince1970,
+            accuracy: 0.002,
+            "recordedAt must survive the round trip to millisecond precision — a whole-second "
+                + "`.iso8601` codec would drop up to ~1s here, far outside this tolerance"
+        )
+    }
+
     func testLoadMissingFileYieldsEmptyLedger() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("does-not-exist-\(UUID().uuidString).json")
         let ledger = try DismissalsLedger.load(from: url)

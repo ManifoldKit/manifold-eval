@@ -30,6 +30,12 @@ enum DiffCommand {
         var ollamaURLString = "http://localhost:11434"
         var coreCommit = "unknown"
         var outPath: String?
+        /// Path to a `DismissalsLedger` JSON file (see `DismissalsCommand`). When
+        /// set, a flagged `genuineDivergence` is checked against the ledger and
+        /// suppressed (exit 0, annotated) if a live dismissal matches this run's
+        /// `(cell, signature)`. When unset, behavior is unchanged — the ledger is
+        /// never consulted.
+        var dismissalsPath: String?
     }
 
     /// Parses argv into ``ParsedArguments``. `die` is invoked (and never
@@ -81,6 +87,7 @@ enum DiffCommand {
             case "--ollama-url": parsed.ollamaURLString = value(&index, token)
             case "--core-commit": parsed.coreCommit = value(&index, token)
             case "--out": parsed.outPath = value(&index, token)
+            case "--dismissals": parsed.dismissalsPath = value(&index, token)
             default:
                 die("unknown flag '\(token)'", 2)
             }
@@ -112,6 +119,7 @@ enum DiffCommand {
         let ollamaURLString = parsed.ollamaURLString
         let coreCommit = parsed.coreCommit
         let outPath = parsed.outPath
+        let dismissalsPath = parsed.dismissalsPath
 
         // --- Validate argument combinations ---
         guard let model else { die("diff requires --model <ollama-tag>", 2) }
@@ -213,51 +221,126 @@ enum DiffCommand {
             die("\(error)", 1)
         }
 
-        let report = DivergenceReport.render(outcome)
+        let evaluation = Self.evaluate(
+            outcome: outcome,
+            ollamaModel: model,
+            dismissalsPath: dismissalsPath,
+            warn: warn
+        )
 
         if let outPath {
             do {
-                try report.write(toFile: outPath, atomically: true, encoding: .utf8)
+                try evaluation.report.write(toFile: outPath, atomically: true, encoding: .utf8)
             } catch {
                 die("writing \(outPath): \(error)", 1)
             }
             warn("wrote \(outPath)")
         } else {
-            print(report)
+            print(evaluation.report)
         }
 
-        // Exit code reflects the verdict so CI/scripts can branch on it:
-        //   0 = no actionable divergence (identical / samplerNondeterminism)
-        //   1 = a control failure or genuine divergence a human should look at
-        //       (promptDivergence / tokenizerDivergence / samplerMismatch /
-        //        genuineDivergence), OR an Ollama-only determinism control that came
-        //        back VARIANT (the control itself failed — N3)
-        //   3 = indeterminate — a leg's determinism was never assessed; rerun with
-        //       more --repeats (neither a clean pass nor a confirmed divergence)
-        //   4 = degenerateRepetitionLengthMismatch — both outputs are the same
-        //       repeating unit at different lengths, a stopping-length artifact.
-        //       Non-zero (worth a look — why did the lengths differ?) but
-        //       deliberately distinct from 1 so a script can tell "same content,
-        //       different repeat count" apart from a genuine content divergence.
-        guard let divergence = outcome.comparison?.divergence else {
+        exit(evaluation.exitCode)
+    }
+
+    /// The result of triaging a ``DifferentialOutcome`` into a rendered report
+    /// plus the exit code the CLI should use.
+    struct Evaluation: Equatable {
+        var report: String
+        var exitCode: Int32
+    }
+
+    /// Extracted from ``run`` (mirrors ``parseArguments``) so the exit-code /
+    /// dismissal-suppression logic is unit-testable without an `exit()` call
+    /// tearing down the test process.
+    ///
+    /// Exit code reflects the verdict so CI/scripts can branch on it:
+    ///   0 = no actionable divergence (identical / samplerNondeterminism), OR a
+    ///       genuineDivergence suppressed by a LIVE dismissal in the ledger.
+    ///   1 = a control failure or genuine divergence a human should look at
+    ///       (promptDivergence / tokenizerDivergence / samplerMismatch /
+    ///       genuineDivergence with no matching live dismissal), OR an
+    ///       Ollama-only determinism control that came back VARIANT (N3).
+    ///   3 = indeterminate — a leg's determinism was never assessed; rerun with
+    ///       more --repeats (neither a clean pass nor a confirmed divergence).
+    ///   4 = degenerateRepetitionLengthMismatch — both outputs are the same
+    ///       repeating unit at different lengths, a stopping-length artifact.
+    ///       Non-zero (worth a look — why did the lengths differ?) but
+    ///       deliberately distinct from 1 so a script can tell "same content,
+    ///       different repeat count" apart from a genuine content divergence.
+    static func evaluate(
+        outcome: DifferentialOutcome,
+        ollamaModel: String,
+        dismissalsPath: String?,
+        warn: (String) -> Void
+    ) -> Evaluation {
+        var report = DivergenceReport.render(outcome)
+
+        guard let comparison = outcome.comparison else {
             // Ollama-only run: no cross-backend comparison, just the determinism
             // control. A VARIANT control (assessed but not reproducible) is itself a
             // finding worth surfacing; a stable or unassessed control passes.
             if outcome.ollama.wasAssessed && !outcome.ollama.isDeterministic {
                 warn("Ollama determinism control came back VARIANT — temp=0 not reproducible")
-                exit(1)
+                return Evaluation(report: report, exitCode: 1)
             }
-            exit(0)
+            return Evaluation(report: report, exitCode: 0)
         }
-        switch divergence {
-        case .promptDivergence, .tokenizerDivergence, .samplerMismatch, .genuineDivergence:
-            exit(1)
+
+        switch comparison.divergence {
+        case .promptDivergence, .tokenizerDivergence, .samplerMismatch:
+            return Evaluation(report: report, exitCode: 1)
         case .indeterminate:
-            exit(3)
+            return Evaluation(report: report, exitCode: 3)
         case .degenerateRepetitionLengthMismatch:
-            exit(4)
+            return Evaluation(report: report, exitCode: 4)
         case .identical, .samplerNondeterminism:
-            exit(0)
+            return Evaluation(report: report, exitCode: 0)
+        case .genuineDivergence:
+            // Confirmed by-design divergences can be dismissed via the ledger
+            // (see DismissalsLedger / the `dismiss` command) so a triage command
+            // stops re-flagging the same, already-adjudicated finding on every
+            // run. The signature/cell are always printed so a human can copy
+            // them straight into `manifold-eval dismiss`.
+            guard let repA = comparison.a.representative, let repB = comparison.b.representative else {
+                // Unreachable in practice — DifferentialRecord.compare only
+                // builds a record when both representatives exist — but fail
+                // safe (surface, don't suppress) rather than force-unwrap.
+                return Evaluation(report: report, exitCode: 1)
+            }
+            let cell = [ollamaModel, repA.backend, repB.backend, outcome.promptSha256].joined(separator: "|")
+            let signature = DivergenceSignature.compute(
+                divergenceClass: comparison.divergence.rawValue,
+                differingText: "\(repA.output)\u{0}\(repB.output)"
+            )
+            report += "## Dismissal\n\n"
+            report += "- cell: `\(cell)`\n"
+            report += "- signature: `\(signature)`\n"
+
+            guard let dismissalsPath else {
+                report += "- status: not checked (pass `--dismissals <path>` to consult a ledger)\n"
+                return Evaluation(report: report, exitCode: 1)
+            }
+
+            let ledger: DismissalsLedger
+            do {
+                ledger = try DismissalsLedger.load(from: URL(fileURLWithPath: dismissalsPath))
+            } catch {
+                warn("could not read dismissals ledger \(dismissalsPath): \(error)")
+                report += "- status: ledger unreadable (\(error))\n"
+                return Evaluation(report: report, exitCode: 1)
+            }
+
+            let finding = DismissedFinding(cell: cell, signature: signature)
+            if let entry = ledger.liveEntry(for: finding, asOf: Date()) {
+                let formatter = ISO8601DateFormatter()
+                report += "- status: **SUPPRESSED** by a live dismissal — reason: \(entry.reason), "
+                report += "expires \(formatter.string(from: entry.expiresAt))\n"
+                return Evaluation(report: report, exitCode: 0)
+            }
+
+            report += "- status: not dismissed — run `manifold-eval dismiss --cell '\(cell)' "
+            report += "--signature '\(signature)' --reason <text> --ttl <seconds> --ledger \(dismissalsPath)` to suppress\n"
+            return Evaluation(report: report, exitCode: 1)
         }
     }
 }
