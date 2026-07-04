@@ -19,6 +19,8 @@ import ManifoldTools
 //                         --prompt-file P --expected REF [options…]
 //   manifold-eval baseline <record.json>... --baseline-path PATH [--update]
 //                         [--score-threshold D] [--max-age-hours N] [--out PATH]
+//   manifold-eval triage  --transcript <transcript.json> [--decide genuine|benign]
+//                         [--bos ID|autoDetect|none] [--cohort sameWeights|sameFamily|cloud] [--out PATH]
 
 func die(_ message: String, code: Int32) -> Never {
     FileHandle.standardError.write(Data("error: \(message)\n".utf8))
@@ -51,6 +53,8 @@ guard let subcommand = arguments.first else {
     print("                     [--llama-runner CMD] [--ollama-url URL] [--core-commit SHA] [--out REGRESSION.md]")
     print("  manifold-eval baseline <record.json>... --baseline-path PATH [--update]")
     print("                     [--score-threshold D] [--max-age-hours N] [--out PATH]")
+    print("  manifold-eval triage --transcript <transcript.json> [--decide genuine|benign]")
+    print("                     [--bos ID|autoDetect|none] [--cohort sameWeights|sameFamily|cloud] [--out PATH]")
     exit(2)
 }
 
@@ -153,6 +157,12 @@ case "baseline":
     // against a persisted per-cell baseline, or writes one with --update.
     BaselineCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
+case "triage":
+    // Pre-triage assistant (#23): proposes a brief for a flagged cell, never
+    // adjudicates. Orchestration lives in TriageCommand; the brief type and
+    // classification reuse live in ManifoldEval/Differential/TriageBrief.swift.
+    TriageCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+
 default:
-    die("unknown subcommand '\(subcommand)' (expected: collate, diff, ifeval, ifeval-generate, bfcl, bfcl-generate, mteb, regress, baseline)", code: 2)
+    die("unknown subcommand '\(subcommand)' (expected: collate, diff, ifeval, ifeval-generate, bfcl, bfcl-generate, mteb, regress, baseline, triage)", code: 2)
 }
