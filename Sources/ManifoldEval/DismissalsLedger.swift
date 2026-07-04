@@ -177,16 +177,41 @@ public struct DismissalsLedger: Sendable, Equatable {
     /// written in the same sorted order as ``entries`` — so a re-saved ledger
     /// with no semantic change produces byte-identical output (diffable in a
     /// review, and round-trips stably in tests).
+    /// Plain `.iso8601` truncates to whole seconds, which would lose precision
+    /// on round-trip (`Date()` carries sub-second resolution) — using
+    /// fractional seconds keeps `load(from:)` after `save(to:)` byte-for-byte
+    /// and value-for-value stable. Built fresh per call rather than cached in a
+    /// shared static: `ISO8601DateFormatter` is not `Sendable`, and this is not
+    /// a hot path (dismissals are a low-frequency, human-driven operation).
+    private static func makeISO8601Formatter() -> ISO8601DateFormatter {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }
+
     private static func makeEncoder() -> JSONEncoder {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            var container = encoder.singleValueContainer()
+            try container.encode(makeISO8601Formatter().string(from: date))
+        }
         return encoder
     }
 
     private static func makeDecoder() -> JSONDecoder {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let raw = try container.decode(String.self)
+            guard let date = makeISO8601Formatter().date(from: raw) else {
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "expected ISO-8601 date with fractional seconds, got '\(raw)'"
+                )
+            }
+            return date
+        }
         return decoder
     }
 
