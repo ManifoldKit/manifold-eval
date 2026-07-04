@@ -5,6 +5,9 @@
 > This document captures the *why* — the decision history that produced the repo — because the
 > most valuable thing to carry across a repo split is the reasoning, and reasoning doesn't survive
 > in code.
+>
+> Cross-reference links point at **ManifoldKit** issues/PRs unless a link's text says otherwise;
+> a few point at this repo's own PRs. GitHub redirects an `/issues/N` URL to the PR when `N` is a PR.
 
 This repo was not a greenfield decision. It was **earned** over ~3 weeks of work inside
 ManifoldKit that built the assurance machinery in-place first, proved it on real model data, had a
@@ -33,7 +36,7 @@ requirement, never to be automated away.
 
 ---
 
-## 1. The dedup play, rejected (#1993)
+## 1. The dedup play, rejected ([#1993](https://github.com/ManifoldKit/ManifoldKit/issues/1993))
 
 The first proposal was a pure **deduplication** argument: two downstream apps had each built eval /
 replay infrastructure on ManifoldKit backends, and the kit had no eval layer — so extract a shared
@@ -50,13 +53,15 @@ Three adversarial reviewers killed it (2026-06-21):
 
 But the rejection **carved out a door**: a *product*-motivated on-device eval opportunity that the
 Python-centric incumbents (Inspect AI, promptfoo, OpenAI Evals, lm-eval-harness, HELM) under-serve —
-to be pursued on its own merits, *never* on dedup grounds. That became #1997.
+to be pursued on its own merits, *never* on dedup grounds. That became
+[#1997](https://github.com/ManifoldKit/ManifoldKit/issues/1997).
 
 ---
 
-## 2. The product reframing (#1997)
+## 2. The product reframing ([#1997](https://github.com/ManifoldKit/ManifoldKit/issues/1997))
 
-#1997 reframed eval as a **product** with a defensible moat no cloud-first framework can reproduce.
+[#1997](https://github.com/ManifoldKit/ManifoldKit/issues/1997) reframed eval as a **product** with a
+defensible moat no cloud-first framework can reproduce.
 Every incumbent is cloud-first and non-deterministic by default; ManifoldKit is on-device, Swift,
 local-first, and already ships the spine. The genuinely ownable card:
 
@@ -68,11 +73,13 @@ This **replay-regression moat** is the reason a separate repo eventually earned 
 
 ---
 
-## 3. The tool-call tributary — "assess, don't declare" (#2001 → #2005)
+## 3. The tool-call tributary — "assess, don't declare" ([#2001](https://github.com/ManifoldKit/ManifoldKit/issues/2001) → [#2005](https://github.com/ManifoldKit/ManifoldKit/issues/2005))
 
 A parallel thread forged the epistemics the eval rests on. A host app wanted to steer users toward
 models that actually tool-call, and asked for a **static capability flag** on the model-info type
-(#2001). That was rejected and superseded (#2005) on a principle that is now load-bearing here:
+([#2001](https://github.com/ManifoldKit/ManifoldKit/issues/2001)). That was rejected and superseded
+([#2005](https://github.com/ManifoldKit/ManifoldKit/issues/2005)) on a principle that is now
+load-bearing here:
 
 > Whether a model genuinely tool-calls is **irreducibly empirical** — a property of weights, knowable
 > only by *measurement*, not derivable from any static signal. (A base model can ship the identical
@@ -85,7 +92,7 @@ conformance later became the first live consumer of the eval scorer surface (§5
 
 ---
 
-## 4. The in-place consolidation — the foundation (#2041–#2047)
+## 4. The in-place consolidation — the foundation ([#2041](https://github.com/ManifoldKit/ManifoldKit/issues/2041)–[#2047](https://github.com/ManifoldKit/ManifoldKit/issues/2047))
 
 Here a dedicated `manifold-eval` repo was first **proposed and rejected** by three reviewers
 (architecture / methodology / pragmatism). The rejection grounds matter, because the override later
@@ -107,32 +114,36 @@ justifications are false."* It shipped as **six in-place PRs** — the machinery
 
 | PR | Shipped | Why it matters here |
 |----|---------|---------------------|
-| **#2041** | `ConformanceRecord` + `CellStatus` schema | `notMeasured` made a **first-class state** — a missing GGUF / offline backend never reads as a measured `fail`. *Absence ≠ regression.* |
-| **#2042** | Corpus loads from `Bundle.module`, not CWD | Kills companion vendoring-drift. |
-| **#2043** | **Scorer TP-attribution bug fix** | The headline defect: the recovery matched only backtick-quoted required-tool tokens, so a correct call scored as a false positive. The cell a human had hand-corrected now scores correctly through the automated pipeline (F1 0.000 → 0.810). |
-| **#2045** | `ConformanceScorer.records(...)` public API | Absence-aware: unreadable → `loadFail`, empty → `notMeasured`. Never a dropped row or a measured zero. |
-| **#2046** | `MatrixRenderer` + `matrix` CLI | The matrix becomes a deterministic rendered query over records. Holes render as distinct reasons, never a fake `0.000`; the cross-runtime view **explicitly labels** that a verdict difference is *not, on its own, a backend bug*. |
-| **#2047** | Verdict bands on aggregate F1, not dominant failure subtype | A 0.750-F1 cell had been mislabeled by its most-common *failure* subtype, eroding matrix trust. |
+| **[#2041](https://github.com/ManifoldKit/ManifoldKit/issues/2041)** | `ConformanceRecord` + `CellStatus` schema | `notMeasured` made a **first-class state** — a missing GGUF / offline backend never reads as a measured `fail`. *Absence ≠ regression.* |
+| **[#2042](https://github.com/ManifoldKit/ManifoldKit/issues/2042)** | Corpus loads from `Bundle.module`, not CWD | Kills companion vendoring-drift. |
+| **[#2043](https://github.com/ManifoldKit/ManifoldKit/issues/2043)** | **Scorer TP-attribution bug fix** | The headline defect: the recovery matched only backtick-quoted required-tool tokens, so a correct call scored as a false positive. The cell a human had hand-corrected now scores correctly through the automated pipeline (F1 0.000 → 0.810). |
+| **[#2045](https://github.com/ManifoldKit/ManifoldKit/issues/2045)** | `ConformanceScorer.records(...)` public API | Absence-aware: unreadable → `loadFail`, empty → `notMeasured`. Never a dropped row or a measured zero. |
+| **[#2046](https://github.com/ManifoldKit/ManifoldKit/issues/2046)** | `MatrixRenderer` + `matrix` CLI | The matrix becomes a deterministic rendered query over records. Holes render as distinct reasons, never a fake `0.000`; the cross-runtime view **explicitly labels** that a verdict difference is *not, on its own, a backend bug*. |
+| **[#2047](https://github.com/ManifoldKit/ManifoldKit/issues/2047)** | Verdict bands on aggregate F1, not dominant failure subtype | A 0.750-F1 cell had been mislabeled by its most-common *failure* subtype, eroding matrix trust. |
 
-The validation headline (#2048): the exact transcript the overnight run wrongly reported as
+The validation headline ([#2048](https://github.com/ManifoldKit/ManifoldKit/issues/2048)): the exact
+transcript the overnight run wrongly reported as
 **F1=0.000 now scores F1=0.810** through the automated path — no human JSONL read needed. Within-run
 repeats were bit-identical, proving the earlier ~0.1 F1 swings were **cross-environment drift, not
 per-call noise** — the first concrete win for determinism discipline. A later cleanup
 (net **+575 / −14,978 lines**) established the convention that **the rendered `MATRIX.md` *is* the
 artifact** — raw scratch never returns to git.
 
-Then **BFCL argument-level scoring** (#2057) expanded the mission from "did it call the right
+Then **BFCL argument-level scoring**
+([#2057](https://github.com/ManifoldKit/ManifoldKit/issues/2057)) expanded the mission from "did it
+call the right
 *function*" to "did it pass the right *arguments*" — and proved cross-backend differential signal is
 real: the same model scored **92% name-only vs 32% AST**, and **32% (Ollama) vs 64% (llama.cpp)** on
 tool-call handling alone.
 
 ---
 
-## 5. The on-device scorer surface, and the #2064 lesson (#2067)
+## 5. The on-device scorer surface, and the [#2064](https://github.com/ManifoldKit/ManifoldKit/issues/2064) lesson ([#2067](https://github.com/ManifoldKit/ManifoldKit/issues/2067))
 
 The scorer surface (`Score` / `ScoreValue` / `EvalScorer` / `SemanticSimilarityScorer`) was built
 **in-core first** so this repo would *consume* it, never fork it. It shipped with **BFCL adoption as
-its live in-repo consumer** — and that was deliberate, applying the **#2064 lesson**:
+its live in-repo consumer** — and that was deliberate, applying the
+**[#2064](https://github.com/ManifoldKit/ManifoldKit/issues/2064) lesson**:
 
 > **A read path with no writer is dead code.** A feature that exists but isn't wired is worse than
 > none: it reads as covered when it isn't.
@@ -176,10 +187,17 @@ waving it away:
   and **owns nothing** companions consume. The corpus, `ConformanceScorer`, `ConformanceRecord`,
   `MatrixRenderer`, and `ASTMatcher` **stay in `ManifoldTools`** and are imported, never moved.
 - **One-process** → accepted in full; the repo is a *separate-process orchestrator + collator*.
-- **Rot** → answered by a named owner + a fixed Apple-Silicon cadence + a CI **rot-guard** that fails
-  if the last successful run is stale or the evaluated cell-manifest shrank. Staleness becomes a red
-  check, not silence. *This is a dependency, not an escape: an assurance repo that lags the
-  implementation is worse than none, because stale assurance reads as a passing grade.*
+- **Rot** → answered in two tiers, and honestly only half-closed today. A weekly CI **rot-guard**
+  ([this repo's #19](https://github.com/ManifoldKit/manifold-eval/pull/19), landed 2026-07-04) builds
+  the surface and runs the fixture-driven tests against the current core pin, so compile / contract
+  drift during quiet stretches surfaces as a red check rather than silence. It is deliberately
+  **Tier-1 only**: it runs *no* models, so a green rot-guard means "still compiles + fixtures hold,"
+  never "the models still score the same." The model-bearing credibility numbers (live BFCL / IFEval
+  / MTEB, cross-quant `regress`) remain an **on-demand local Apple-Silicon sweep**; a *committed owner
+  and fixed cadence* for that sweep are the **still-open half** of this answer — until they exist,
+  the rejection's rot worry is mitigated, not retired. *This is a dependency, not an escape: an
+  assurance repo that lags the implementation is worse than none, because stale assurance reads as a
+  passing grade.*
 
 The split then executed fast, gated on a **falsifiable credibility test**: if the same-bytes
 differential didn't produce a trustworthy signal, *stop* and fall back to the in-place path. It
@@ -193,25 +211,28 @@ output, classified `identical`** — proving the differential oracle works befor
 These were forged in the arc above and should survive in every line of this repo:
 
 1. **Assess, don't declare.** Capability is empirical — measured per `(model × quant × backend ×
-   renderer)` cell, never asserted from a static flag. (#2005)
+   renderer)` cell, never asserted from a static flag.
+   ([#2005](https://github.com/ManifoldKit/ManifoldKit/issues/2005))
 2. **Divergence ≠ bug without a same-bytes control.** Hold quant + checkpoint constant (identical
    GGUF on both runtimes) before any cross-backend delta is load-bearing. Classify every divergence
    (`identical` / `promptDivergence` / `samplerNondeterminism` / `tokenizerDivergence` /
    `genuineDivergence`); only the last is a bug candidate. The triage exists to **focus human
    attention**, not to auto-detect bugs.
 3. **Absence ≠ failure.** A missing model is `notMeasured`, guarded against ever reading as a
-   regression. (#2041)
+   regression. ([#2041](https://github.com/ManifoldKit/ManifoldKit/issues/2041))
 4. **Determinism, pinned and reported.** Greedy / `temp=0`, fixed seed where supported; report
    variance over N repeats, never means-only. A re-drive that isn't bit-identical for identical
    config makes any regression gate cry wolf.
 5. **Cloud is a sanity check, never an oracle.** Nondeterministic and over the network — absolute
    score only, never in a differential cohort.
 6. **A read path with no live consumer is dead code.** Every surface ships with a real consumer that
-   exercises it. (#2064)
+   exercises it. ([#2064](https://github.com/ManifoldKit/ManifoldKit/issues/2064))
 7. **Keep the human in the loop.** The transcript spot-check caught the founding scorer bug; auto-
    rendering must never remove it.
 8. **No owner, no repo.** Independence only improves credibility with a committed owner + cadence +
-   rot-guard. Without them, this is the fuzz outcome with extra steps.
+   rot-guard. Without them, this is the fuzz outcome with extra steps. *(Status: the weekly Tier-1
+   rot-guard landed 2026-07-04; the committed owner + fixed local-sweep cadence remain open — so this
+   principle is not yet fully satisfied. Don't let this note be deleted until they are.)*
 
 ---
 
@@ -234,5 +255,16 @@ control, and a read path with no live consumer is dead code.**
 - ManifoldKit `docs/plans/1997-on-device-eval.md` — the product reframing + replay-moat reasoning
 - ManifoldKit `docs/plans/manifold-eval-repo.md` — the dedicated-repo rejection + the six in-place PRs
 - ManifoldKit `docs/plans/manifold-eval-repo-v2-override.md` — the override + phasing (system-of-record)
-- In-place PRs: #2027 #2030 #2033 #2034 (conformance spine) · #2041–#2047 (consolidation) · #2057 (BFCL) · #2067 (scorer surface)
-- Issues: #1993 (dedup, rejected) · #1997 (product reframing) · #2001 → #2005 (assess-don't-declare)
+- In-place PRs:
+  [#2027](https://github.com/ManifoldKit/ManifoldKit/issues/2027)
+  [#2030](https://github.com/ManifoldKit/ManifoldKit/issues/2030)
+  [#2033](https://github.com/ManifoldKit/ManifoldKit/issues/2033)
+  [#2034](https://github.com/ManifoldKit/ManifoldKit/issues/2034) (conformance spine) ·
+  [#2041](https://github.com/ManifoldKit/ManifoldKit/issues/2041)–[#2047](https://github.com/ManifoldKit/ManifoldKit/issues/2047) (consolidation) ·
+  [#2057](https://github.com/ManifoldKit/ManifoldKit/issues/2057) (BFCL) ·
+  [#2067](https://github.com/ManifoldKit/ManifoldKit/issues/2067) (scorer surface)
+- Issues:
+  [#1993](https://github.com/ManifoldKit/ManifoldKit/issues/1993) (dedup, rejected) ·
+  [#1997](https://github.com/ManifoldKit/ManifoldKit/issues/1997) (product reframing) ·
+  [#2001](https://github.com/ManifoldKit/ManifoldKit/issues/2001) → [#2005](https://github.com/ManifoldKit/ManifoldKit/issues/2005) (assess-don't-declare)
+- This repo: [#19](https://github.com/ManifoldKit/manifold-eval/pull/19) (weekly Tier-1 rot-guard)
