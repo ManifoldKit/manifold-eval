@@ -21,6 +21,8 @@ import ManifoldTools
 //                         [--score-threshold D] [--max-age-hours N] [--out PATH]
 //   manifold-eval triage  --transcript <transcript.json> [--decide genuine|benign]
 //                         [--bos ID|autoDetect|none] [--cohort sameWeights|sameFamily|cloud] [--out PATH]
+//   manifold-eval dismiss --cell <id> --signature <hex> --reason <text> --ttl <seconds> [--ledger PATH]
+//   manifold-eval dismissals [--ledger PATH] [--prune]
 
 func die(_ message: String, code: Int32) -> Never {
     FileHandle.standardError.write(Data("error: \(message)\n".utf8))
@@ -55,6 +57,8 @@ guard let subcommand = arguments.first else {
     print("                     [--score-threshold D] [--max-age-hours N] [--out PATH]")
     print("  manifold-eval triage --transcript <transcript.json> [--decide genuine|benign]")
     print("                     [--bos ID|autoDetect|none] [--cohort sameWeights|sameFamily|cloud] [--out PATH]")
+    print("  manifold-eval dismiss --cell <id> --signature <hex> --reason <text> --ttl <seconds> [--ledger PATH]")
+    print("  manifold-eval dismissals [--ledger PATH] [--prune]")
     exit(2)
 }
 
@@ -163,6 +167,20 @@ case "triage":
     // classification reuse live in ManifoldEval/Differential/TriageBrief.swift.
     TriageCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
+case "dismiss":
+    // Records a confirmed by-design divergence dismissal (issue #25) — suppresses
+    // re-triage of a settled cell+signature until its TTL expires. Isolated block:
+    // the sibling triage command that PRODUCES flagged findings is out of scope
+    // here; DismissalsLedger's filter API is generic over cell+signature strings.
+    DismissalsCommand.runDismiss(Array(arguments.dropFirst()), die: die, warn: warn)
+
+case "dismissals":
+    DismissalsCommand.runDismissals(Array(arguments.dropFirst()), die: die, warn: warn)
+
 default:
-    die("unknown subcommand '\(subcommand)' (expected: collate, diff, ifeval, ifeval-generate, bfcl, bfcl-generate, mteb, regress, baseline, triage)", code: 2)
+    die(
+        "unknown subcommand '\(subcommand)' (expected: collate, diff, ifeval, ifeval-generate, bfcl, "
+            + "bfcl-generate, mteb, regress, baseline, triage, dismiss, dismissals)",
+        code: 2
+    )
 }
