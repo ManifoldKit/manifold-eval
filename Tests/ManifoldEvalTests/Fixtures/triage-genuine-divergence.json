@@ -1,0 +1,84 @@
+{
+  "legA": [
+    {
+      "backend": "ollama",
+      "model": "mistral-7b-instruct-v0.3",
+      "quant": "server",
+      "promptSha256": "deadbeef00",
+      "inputTokenIds": [],
+      "output": "The answer is forty-two.",
+      "outputTokenIds": [],
+      "sampler": { "temperature": 0, "seed": 0, "topK": 0, "repeatPenalty": 1.0, "maxTokens": 128 },
+      "coreCommit": "4461529f",
+      "toolingVersions": { "ollama": "0.30.11" },
+      "repeatIndex": 0
+    },
+    {
+      "backend": "ollama",
+      "model": "mistral-7b-instruct-v0.3",
+      "quant": "server",
+      "promptSha256": "deadbeef00",
+      "inputTokenIds": [],
+      "output": "The answer is forty-two.",
+      "outputTokenIds": [],
+      "sampler": { "temperature": 0, "seed": 0, "topK": 0, "repeatPenalty": 1.0, "maxTokens": 128 },
+      "coreCommit": "4461529f",
+      "toolingVersions": { "ollama": "0.30.11" },
+      "repeatIndex": 1
+    },
+    {
+      "backend": "ollama",
+      "model": "mistral-7b-instruct-v0.3",
+      "quant": "server",
+      "promptSha256": "deadbeef00",
+      "inputTokenIds": [],
+      "output": "The answer is forty-two.",
+      "outputTokenIds": [],
+      "sampler": { "temperature": 0, "seed": 0, "topK": 0, "repeatPenalty": 1.0, "maxTokens": 128 },
+      "coreCommit": "4461529f",
+      "toolingVersions": { "ollama": "0.30.11" },
+      "repeatIndex": 2
+    }
+  ],
+  "legB": [
+    {
+      "backend": "llama.cpp",
+      "model": "mistral-7b-instruct-v0.3",
+      "quant": "Q4_K_M",
+      "promptSha256": "deadbeef00",
+      "inputTokenIds": [],
+      "output": "The answer is 42.",
+      "outputTokenIds": [],
+      "sampler": { "temperature": 0, "seed": 0, "topK": 0, "repeatPenalty": 1.0, "maxTokens": 128 },
+      "coreCommit": "4461529f",
+      "toolingVersions": { "llama.cpp": "b8772" },
+      "repeatIndex": 0
+    },
+    {
+      "backend": "llama.cpp",
+      "model": "mistral-7b-instruct-v0.3",
+      "quant": "Q4_K_M",
+      "promptSha256": "deadbeef00",
+      "inputTokenIds": [],
+      "output": "The answer is 42.",
+      "outputTokenIds": [],
+      "sampler": { "temperature": 0, "seed": 0, "topK": 0, "repeatPenalty": 1.0, "maxTokens": 128 },
+      "coreCommit": "4461529f",
+      "toolingVersions": { "llama.cpp": "b8772" },
+      "repeatIndex": 1
+    },
+    {
+      "backend": "llama.cpp",
+      "model": "mistral-7b-instruct-v0.3",
+      "quant": "Q4_K_M",
+      "promptSha256": "deadbeef00",
+      "inputTokenIds": [],
+      "output": "The answer is 42.",
+      "outputTokenIds": [],
+      "sampler": { "temperature": 0, "seed": 0, "topK": 0, "repeatPenalty": 1.0, "maxTokens": 128 },
+      "coreCommit": "4461529f",
+      "toolingVersions": { "llama.cpp": "b8772" },
+      "repeatIndex": 2
+    }
+  ]
+}
