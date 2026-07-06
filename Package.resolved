@@ -1,13 +1,13 @@
 {
-  "originHash" : "38b7ba0f96cda58d0de509d19b380b8df13899a8cac07cb6e75833d9983168dc",
+  "originHash" : "95f49db30dcd62d0f4620ce70a7f98cdfd66ec129f09099dbcdf825d82525cc5",
   "pins" : [
     {
       "identity" : "anylanguagemodel",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/huggingface/AnyLanguageModel",
       "state" : {
-        "revision" : "163f3855a53235b4ebeb69cf5e9f228215ae35b5",
-        "version" : "0.8.0"
+        "revision" : "f22b78e6b10f67e7d46c67dc59a8a35bc259fbce",
+        "version" : "0.9.0"
       }
     },
     {
@@ -60,8 +60,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ManifoldKit/ManifoldKit.git",
       "state" : {
-        "revision" : "974fbda4dc733fcd7339b01dee2aae84d9252478",
-        "version" : "0.65.0"
+        "revision" : "5406e2511a359ed78f71e4a12a8afed6dd446905",
+        "version" : "0.66.0"
       }
     },
     {
@@ -78,8 +78,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ml-explore/mlx-swift-lm",
       "state" : {
-        "revision" : "25b00d4e22e61ec9c41efda47990cd2084ec87ff",
-        "version" : "2.31.3"
+        "revision" : "bd4b7434e6bdb588c7ef55706ff8904cb7fd4c57",
+        "version" : "3.31.4"
       }
     },
     {
@@ -303,8 +303,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/swiftlang/swift-syntax",
       "state" : {
-        "revision" : "0687f71944021d616d34d922343dcef086855920",
-        "version" : "600.0.1"
+        "revision" : "4799286537280063c85a32f09884cfbca301b1a1",
+        "version" : "602.0.0"
       }
     },
     {
