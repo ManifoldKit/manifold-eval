@@ -250,6 +250,71 @@ final class ToolLoopLaneTests: XCTestCase {
         }
     }
 
+    /// The chained probe is only sound if the sentinel CANNOT leak from the
+    /// target tool itself: the target's fallback payload must not contain
+    /// the sentinel, and any argument-keyed payload that does contain it
+    /// must be reachable only BY the sentinel. Otherwise an episode that
+    /// never called the source tool can obtain — and "thread" — the sentinel
+    /// from the target's own response (the review's false-pass scenario).
+    /// Same closure for the answer axis: on chained cases the required
+    /// answer values must not be reachable without the sentinel argument,
+    /// or a broken chain still produces a correct-looking answer.
+    func testChainedCaseTargetToolsCannotLeakSentinelsOrAnswers() {
+        for toolLoopCase in ToolLoopCorpus.builtin {
+            guard let chained = toolLoopCase.expect.chainedCall else { continue }
+            let target = toolLoopCase.tools.first { $0.name == chained.toolName }!
+            let sentinel = chained.expectedValue
+
+            XCTAssertFalse(
+                target.script.result.contains(sentinel),
+                "\(toolLoopCase.id): target fallback payload leaks the sentinel"
+            )
+            for answer in toolLoopCase.expect.finalAnswerMustContain {
+                XCTAssertFalse(
+                    target.script.result.contains(answer),
+                    "\(toolLoopCase.id): target fallback payload leaks required answer '\(answer)'"
+                )
+            }
+            for (key, payload) in target.script.resultsByArgument ?? [:] where key != sentinel {
+                XCTAssertFalse(
+                    payload.contains(sentinel),
+                    "\(toolLoopCase.id): payload for '\(key)' leaks the sentinel"
+                )
+                for answer in toolLoopCase.expect.finalAnswerMustContain {
+                    XCTAssertFalse(
+                        payload.contains(answer),
+                        "\(toolLoopCase.id): payload for '\(key)' leaks required answer '\(answer)'"
+                    )
+                }
+            }
+        }
+    }
+
+    func testEveryBuiltinCaseSpecifiesAtLeastOneAxis() {
+        for toolLoopCase in ToolLoopCorpus.builtin {
+            XCTAssertTrue(
+                toolLoopCase.expect.firstCall != nil
+                    || toolLoopCase.expect.chainedCall != nil
+                    || !toolLoopCase.expect.finalAnswerMustContain.isEmpty,
+                "\(toolLoopCase.id): no expectation axis — would pass vacuously"
+            )
+        }
+    }
+
+    func testExpectationLessFileCaseIsRejectedAtLoad() throws {
+        let json = #"{"id":"vacuous","userPrompt":"p","tools":[{"name":"t","description":"d","parameters":{"type":"object"},"script":{"result":"{}"}}],"expect":{"finalAnswerMustContain":[]}}"#
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("toolloop-vacuous-\(UUID().uuidString).jsonl")
+        try json.write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        XCTAssertThrowsError(try ToolLoopCorpus.load(path: url.path)) { error in
+            guard case ToolLoopError.invalidCase = error else {
+                return XCTFail("expected invalidCase, got \(error)")
+            }
+        }
+    }
+
     func testCorpusFileOverrideRoundTripsThroughJSONL() throws {
         // Encode the builtin corpus to JSONL, load it back through the file
         // path, and require equality — proves the documented file format is

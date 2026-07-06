@@ -16,6 +16,13 @@ import ManifoldInference
 @MainActor
 public enum ToolLoopEpisodeDriver {
 
+    /// Records one episode. Never throws: an episode that times out or dies
+    /// at the backend returns whatever was recorded up to the failure with
+    /// ``ToolLoopTranscriptEntry/error`` set — partial evidence a human can
+    /// triage, and a marker the scorer uses to exclude the entry from
+    /// measurement (an infrastructure failure must not score as a
+    /// capability zero).
+    ///
     /// Determinism-pinned config, matching `BFCLRunner.emittedCalls`' sampler
     /// (temp 0, topK 1) so tool-loop cells stay comparable with the
     /// single-turn BFCL cells measured on the same model.
@@ -26,9 +33,9 @@ public enum ToolLoopEpisodeDriver {
         service: InferenceService,
         maxToolIterations: Int = 4,
         timeoutSeconds: Double = 180
-    ) async throws -> ToolLoopTranscriptEntry {
+    ) async -> ToolLoopTranscriptEntry {
         let messages = [StructuredMessage(role: "user", content: toolLoopCase.userPrompt)]
-        var config = GenerationConfig(
+        let config = GenerationConfig(
             temperature: 0.0,
             topP: 0.9,
             repeatPenalty: 1.1,
@@ -38,76 +45,71 @@ public enum ToolLoopEpisodeDriver {
             toolChoice: .auto,
             maxToolIterations: maxToolIterations
         )
-        // Opt in to the promptRendered event — off by default for privacy,
-        // and the only source of the rendered-bytes comparability hash.
-        config.captureRenderedPrompt = true
-        let (token, stream) = try service.enqueue(
-            structuredMessages: messages, systemPrompt: "", config: config
-        )
+
+        // Accumulation lives in an actor so a timed-out or crashed drain
+        // still yields everything recorded before the failure — a timeout on
+        // turn 4 of a healthy 3-turn chain must not discard the chain.
+        let recorder = EpisodeRecorder()
+
+        func entry(error: String?) async -> ToolLoopTranscriptEntry {
+            let (events, lastSegment) = await recorder.snapshot()
+            return ToolLoopTranscriptEntry(
+                id: toolLoopCase.id,
+                repeatIndex: repeatIndex,
+                events: events,
+                finalText: lastSegment.trimmingCharacters(in: .whitespacesAndNewlines),
+                error: error
+            )
+        }
 
         // Race the drain against the episode deadline; on timeout the backend
         // generation MUST be cancelled (not just abandoned) so a model that
         // never emits a stop token can't stall the whole run — the same
         // policy as BFCLRunner, applied per episode instead of per call.
-        let recording = try await withEpisodeTimeout(
-            seconds: timeoutSeconds,
-            cancel: { service.cancel(token) },
-            drain: {
-                var events: [ToolLoopTranscriptEntry.Event] = []
-                // Text accumulates into the CURRENT segment; each tool result
-                // starts a new one. The final answer is the last segment —
-                // text the model produced after the last threaded result.
-                var currentSegment = ""
-                var promptSHA: String?
-
-                for try await event in stream.events {
-                    switch event {
-                    case .promptRendered(let text):
-                        // First render wins: it is the episode's opening
-                        // prompt bytes, the comparability anchor.
-                        if promptSHA == nil {
-                            promptSHA = PromptHash.sha256Hex(of: text)
+        do {
+            let (token, stream) = try service.enqueue(
+                structuredMessages: messages, systemPrompt: "", config: config
+            )
+            try await withEpisodeTimeout(
+                seconds: timeoutSeconds,
+                cancel: { service.cancel(token) },
+                drain: {
+                    for try await event in stream.events {
+                        switch event {
+                        case .token(let text):
+                            await recorder.recordToken(text)
+                        case .toolCall(let call):
+                            await recorder.recordCall(name: call.toolName, arguments: call.arguments)
+                        case .toolResult(let result):
+                            await recorder.recordResult(content: result.content)
+                        default:
+                            break
                         }
-                    case .token(let text):
-                        currentSegment += text
-                    case .toolCall(let call):
-                        events.append(.call(name: call.toolName, arguments: call.arguments))
-                    case .toolResult(let result):
-                        events.append(.result(content: result.content))
-                        currentSegment = ""
-                    default:
-                        break
                     }
                 }
-                return (events, currentSegment, promptSHA)
-            }
-        )
-
-        return ToolLoopTranscriptEntry(
-            id: toolLoopCase.id,
-            repeatIndex: repeatIndex,
-            events: recording.0,
-            finalText: recording.1.trimmingCharacters(in: .whitespacesAndNewlines),
-            promptSHA256: recording.2
-        )
+            )
+            return await entry(error: nil)
+        } catch {
+            return await entry(error: "\(error)")
+        }
     }
 
-    /// Thrown when an episode exceeds its deadline; the generate loop records
-    /// the episode as errored-empty and continues.
+    /// Thrown when an episode exceeds its deadline; caught inside
+    /// ``recordEpisode`` and folded into the entry's error marker.
     public struct EpisodeTimeout: Error, CustomStringConvertible {
         public let seconds: Double
         public var description: String { "episode timed out after \(Int(seconds))s" }
     }
 
     /// Generic drain-vs-deadline race (`BFCLRunner.withCaseTimeout` is
-    /// internal to ManifoldTools and typed to `[ToolCall]`, so the shape is
-    /// mirrored here rather than reused).
-    static func withEpisodeTimeout<T: Sendable>(
+    /// internal to ManifoldTools, so the shape is mirrored here rather than
+    /// reused).
+    static func withEpisodeTimeout(
         seconds: Double,
         cancel: () -> Void,
-        drain: @escaping @Sendable () async throws -> T
-    ) async throws -> T {
-        try await withThrowingTaskGroup(of: T.self) { group in
+        drain: @escaping @Sendable () async throws -> Void
+    ) async throws {
+        try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask { try await drain() }
             group.addTask {
                 try await Task.sleep(for: .seconds(seconds))
@@ -115,14 +117,40 @@ public enum ToolLoopEpisodeDriver {
             }
             defer { group.cancelAll() }
             do {
-                guard let value = try await group.next() else {
-                    throw EpisodeTimeout(seconds: seconds)
-                }
-                return value
+                // First task to finish wins: a completed drain returns; the
+                // sleep task throws EpisodeTimeout; a drain error rethrows.
+                try await group.next()
             } catch {
                 cancel()
                 throw error
             }
         }
+    }
+}
+
+/// Serializes transcript accumulation so partial state survives a cancelled
+/// or failed drain task.
+private actor EpisodeRecorder {
+    private var events: [ToolLoopTranscriptEntry.Event] = []
+    /// Text accumulates into the CURRENT segment; each tool result starts a
+    /// new one. The final answer is the last segment — text the model
+    /// produced after the last threaded result.
+    private var currentSegment = ""
+
+    func recordToken(_ text: String) {
+        currentSegment += text
+    }
+
+    func recordCall(name: String, arguments: String) {
+        events.append(.call(name: name, arguments: arguments))
+    }
+
+    func recordResult(content: String) {
+        events.append(.result(content: content))
+        currentSegment = ""
+    }
+
+    func snapshot() -> ([ToolLoopTranscriptEntry.Event], String) {
+        (events, currentSegment)
     }
 }

@@ -15,9 +15,9 @@ public extension ToolLoopLane {
         /// repeat order.
         public let entries: [ToolLoopTranscriptEntry]
         /// Episodes whose `emit` threw (timeout, backend error). These still
-        /// get an entry — with no events and empty final text — so the later
-        /// scoring run sees the attempt and scores it as a miss rather than a
-        /// hole.
+        /// get an entry — with the error recorded on the wire — so the later
+        /// scoring run sees the attempt and reports it as a HOLE (not
+        /// measured), never as a measured miss.
         public let errored: Int
 
         public init(entries: [ToolLoopTranscriptEntry], errored: Int) {
@@ -57,26 +57,34 @@ public extension ToolLoopLane {
 
         for (offset, toolLoopCase) in cases.enumerated() {
             for repeatIndex in 0..<max(1, repeats) {
-                let entry: ToolLoopTranscriptEntry
+                var entry: ToolLoopTranscriptEntry
                 do {
                     entry = try await emit(toolLoopCase, repeatIndex)
+                } catch {
+                    // A throwing emit (synthetic producers; the live driver
+                    // folds its own failures into the entry) records the
+                    // error ON THE WIRE so the scorer can exclude the
+                    // episode as a hole instead of reading it as a miss.
+                    entry = ToolLoopTranscriptEntry(
+                        id: toolLoopCase.id,
+                        repeatIndex: repeatIndex,
+                        events: [],
+                        finalText: "",
+                        error: "\(error)"
+                    )
+                }
+                if let episodeError = entry.error {
+                    errored += 1
+                    onProgress(
+                        "  [\(offset + 1)/\(cases.count) r\(repeatIndex)] \(toolLoopCase.id): "
+                        + "ERROR \(episodeError) — recorded as a hole (partial transcript kept)"
+                    )
+                } else {
                     let calls = entry.calls.map(\.name).joined(separator: " → ")
                     onProgress(
                         "  [\(offset + 1)/\(cases.count) r\(repeatIndex)] \(toolLoopCase.id): "
                         + (calls.isEmpty ? "<no tool call>" : calls)
                         + " | final: \(entry.finalText.prefix(60).replacingOccurrences(of: "\n", with: " "))"
-                    )
-                } catch {
-                    errored += 1
-                    entry = ToolLoopTranscriptEntry(
-                        id: toolLoopCase.id,
-                        repeatIndex: repeatIndex,
-                        events: [],
-                        finalText: ""
-                    )
-                    onProgress(
-                        "  [\(offset + 1)/\(cases.count) r\(repeatIndex)] \(toolLoopCase.id): "
-                        + "ERROR \(error) — recorded empty"
                     )
                 }
                 entries.append(entry)

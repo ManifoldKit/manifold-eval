@@ -24,23 +24,26 @@ public struct ToolLoopTranscriptEntry: Sendable, Codable, Equatable {
     /// The model's final visible answer: text emitted AFTER the last tool
     /// result (or the whole visible text when no tool ran).
     public let finalText: String
-    /// SHA-256 of the rendered prompt bytes when the backend reported a
-    /// `promptRendered` event — the same-rendered-bytes comparability hook.
-    /// `nil` when the backend does not surface rendering.
-    public let promptSHA256: String?
+    /// Non-nil when the episode did not run to completion (timeout, backend
+    /// error). Events/finalText then hold whatever was recorded BEFORE the
+    /// failure — partial evidence for human triage — and the scorer treats
+    /// the entry as *not measured*, never as a measured miss: an Ollama
+    /// outage over the last N cases must not read as N capability zeros
+    /// (absence ≠ failure, ORIGINS #3).
+    public let error: String?
 
     public init(
         id: String,
         repeatIndex: Int,
         events: [Event],
         finalText: String,
-        promptSHA256: String? = nil
+        error: String? = nil
     ) {
         self.id = id
         self.repeatIndex = repeatIndex
         self.events = events
         self.finalText = finalText
-        self.promptSHA256 = promptSHA256
+        self.error = error
     }
 
     /// One tool-loop event. Encoded with a `kind` discriminator so the JSONL
@@ -140,6 +143,7 @@ public extension ToolLoopTranscriptEntry {
 public enum ToolLoopError: Error, CustomStringConvertible {
     case transcriptUnreadable(URL, underlying: Error)
     case corpusUnreadable(URL, underlying: Error)
+    case invalidCase(String, String)
 
     public var description: String {
         switch self {
@@ -147,6 +151,8 @@ public enum ToolLoopError: Error, CustomStringConvertible {
             return "cannot read transcript file '\(url.path)': \(underlying)"
         case .corpusUnreadable(let url, let underlying):
             return "cannot read corpus file '\(url.path)': \(underlying)"
+        case .invalidCase(let id, let reason):
+            return "invalid corpus case '\(id)': \(reason)"
         }
     }
 }

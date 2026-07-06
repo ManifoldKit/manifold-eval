@@ -50,7 +50,7 @@ final class ToolLoopGenerateLiveTests: XCTestCase {
                 let service = InferenceService(
                     backend: ollama, name: "ollama", modelName: modelName, toolRegistry: registry
                 )
-                return try await ToolLoopEpisodeDriver.recordEpisode(
+                return await ToolLoopEpisodeDriver.recordEpisode(
                     for: toolLoopCase,
                     repeatIndex: repeatIndex,
                     service: service,

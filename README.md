@@ -259,21 +259,26 @@ Three probe axes per case, each optional (`—` = not probed, never a fake pass/
 (turn-1 correctness, the BFCL overlap), `chained arg` (a later call must carry a sentinel that
 exists only in an earlier tool result, and must occur *after* that result — a matching call emitted
 before any result couldn't have read it and scores as a miss), and `final answer` (result sentinels
-surface in the answer). A case passes only when **every repeat passes every specified axis**;
-cross-repeat variance at `temp=0` is reported as `VARIANT` even when all repeats pass.
+surface in the answer). Chaining cases' target tools are **sentinel-gated**: any argument other
+than the sentinel gets an error payload, exactly as a real API would — so the sentinel cannot leak
+to an episode that never threaded it, and a broken chain produces a visibly broken answer. A case
+passes only when **every repeat passes every specified axis**; cross-repeat variance at `temp=0`
+is reported as `VARIANT` even when all repeats pass. Episodes that error or time out are recorded
+with an error marker and reported as *not measured* holes — never as capability zeros.
 
 What it catches, concretely: `mistral-7b-tools` (q4_K_M, Ollama) passes all four result→answer
-cases 3/3 repeats bit-identically — and fails all three chaining cases the same way, emitting both
-calls in one pre-result batch with *placeholder arguments* (`get_balance(account_id:
-"$result.account_id")`). The final answer still reads correctly, so single-turn scoring and an
-end-to-end eyeball both miss it; against a real API the chain is broken. `gemma3-4b-tools` emits
-zero structured tool calls on this path (a ```` ```tool_code ```` text block instead) and then
-*hallucinates the tool result* — a measured capability zero for the cell, reported as such, never
-as a harness failure.
+cases and the multi-call case 3/3 repeats bit-identically — and fails all three chaining cases the
+same way, emitting both calls in one pre-result batch with *placeholder arguments*
+(`get_balance(account_id: "$result.account_id")`): turn-1 scoring on those same episodes is clean,
+so a single-turn lane reads the cell as healthy while the turn-2 chain is broken. `gemma3-4b-tools`
+emits zero structured tool calls on this path (a ```` ```tool_code ```` text block instead) and
+then *hallucinates the tool result* — a measured capability zero for the cell, reported as such,
+never as a harness failure.
 
-Exit codes: `0` = every case passed and repeats were deterministic; `1` = a threading failure or a
-`temp=0` VARIANT a human should inspect; `3` = indeterminate — no transcript matched any corpus
-case (wrong file or empty run, not a measured zero).
+Exit codes: `0` = every case measured, passed, and repeated deterministically; `1` = a measured
+threading failure or a `temp=0` VARIANT a human should inspect; `3` = indeterminate — nothing
+matched the corpus, or some cases have only missing/errored episodes (holes gate as reruns, not
+regressions).
 
 ## Running real eval lanes
 

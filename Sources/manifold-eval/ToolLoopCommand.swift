@@ -16,11 +16,13 @@ import ManifoldEval
 /// `--title`     Report title. Default: "tool-loop".
 /// `--out`       Write the Markdown report here (stdout otherwise).
 ///
-/// Exit codes are verdict-shaped: `0` = every case passed and repeats were
-/// deterministic; `1` = a threading failure or a temp=0 determinism-control
-/// failure (VARIANT) a human should inspect; `3` = indeterminate — no
-/// transcript matched any corpus case (wrong file or empty run, not a
-/// measured zero).
+/// Exit codes are verdict-shaped: `0` = every case was measured, passed, and
+/// repeated deterministically; `1` = a measured threading failure or a
+/// temp=0 determinism-control failure (VARIANT) a human should inspect;
+/// `3` = indeterminate — nothing matched the corpus, or some cases were not
+/// measured (missing/errored episodes are holes, not failures — an
+/// interrupted generate run must not gate red as if cells regressed).
+/// Measured failures outrank holes: failures + holes exits `1`.
 enum ToolLoopCommand {
 
     static func run(
@@ -106,7 +108,7 @@ enum ToolLoopCommand {
                 die("toolloop: writing \(outPath): \(error)", 1)
             }
             print(
-                "tool-loop: \(result.passed)/\(result.total) case(s) passed"
+                "tool-loop: \(result.passed)/\(result.measured) measured case(s) passed"
                 + (result.variant > 0 ? ", \(result.variant) VARIANT" : "")
                 + (result.missing > 0 ? ", \(result.missing) not measured" : "")
                 + " → \(outPath)"
@@ -115,6 +117,11 @@ enum ToolLoopCommand {
             print(markdown)
         }
 
-        exit(result.allPassed && result.variant == 0 ? 0 : 1)
+        // Measured failure or temp=0 variance → 1; clean but holey → 3
+        // (indeterminate, rerun the missing cells); fully measured and green → 0.
+        if result.passed < result.measured || result.variant > 0 {
+            exit(1)
+        }
+        exit(result.missing > 0 ? 3 : 0)
     }
 }

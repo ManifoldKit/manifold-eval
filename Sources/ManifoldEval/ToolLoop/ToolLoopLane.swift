@@ -55,23 +55,36 @@ public struct ToolLoopLane: Sendable {
     /// One case's outcome across its repeats.
     public struct CaseResult: Sendable, Equatable {
         public let caseID: String
-        /// Per-repeat scores, ordered by repeat index. Empty when the
-        /// transcript file carried no entries for this case.
+        /// Per-repeat scores over MEASURED episodes only (entries whose
+        /// `error` is nil), ordered by repeat index. Empty when nothing for
+        /// this case was measured.
         public let repeats: [RepeatScore]
-        /// True when all repeats produced bit-identical transcripts (same
-        /// event sequence, same final text). Meaningful only with 2+ repeats.
+        /// Episodes excluded from measurement because they carried an error
+        /// marker (timeout, backend failure) — infrastructure holes, never
+        /// capability zeros.
+        public let erroredRepeats: Int
+        /// True when all measured repeats produced bit-identical transcripts
+        /// (same event sequence, same final text). Meaningful only with 2+
+        /// measured repeats.
         public let deterministic: Bool
 
-        /// No transcript was generated for this case — scored as a miss but
-        /// surfaced distinctly (a hole is a hole, not a measured zero).
+        /// Nothing was measured for this case — no transcript at all, or
+        /// only errored episodes. Surfaced distinctly; never a measured zero.
         public var missing: Bool { repeats.isEmpty }
-        /// The strict pass verdict: at least one repeat, and every repeat passed.
+        /// The strict pass verdict: at least one measured repeat, and every
+        /// measured repeat passed.
         public var passed: Bool { !repeats.isEmpty && repeats.allSatisfy(\.pass) }
         public var passedRepeats: Int { repeats.filter(\.pass).count }
 
-        public init(caseID: String, repeats: [RepeatScore], deterministic: Bool) {
+        public init(
+            caseID: String,
+            repeats: [RepeatScore],
+            erroredRepeats: Int = 0,
+            deterministic: Bool
+        ) {
             self.caseID = caseID
             self.repeats = repeats
+            self.erroredRepeats = erroredRepeats
             self.deterministic = deterministic
         }
     }
@@ -83,6 +96,9 @@ public struct ToolLoopLane: Sendable {
         public var total: Int { caseResults.count }
         public var passed: Int { caseResults.filter(\.passed).count }
         public var missing: Int { caseResults.filter(\.missing).count }
+        /// Cases that were actually measured — the honest pass-rate
+        /// denominator (holes are reported beside it, never inside it).
+        public var measured: Int { total - missing }
         /// Cases whose repeats disagreed — a determinism-control failure at
         /// temp=0 regardless of whether the majority passed.
         public var variant: Int {
@@ -106,7 +122,16 @@ public struct ToolLoopLane: Sendable {
     ) -> LaneResult {
         let byCase = Dictionary(grouping: transcripts, by: \.id)
         let results = cases.map { toolLoopCase -> CaseResult in
-            let entries = (byCase[toolLoopCase.id] ?? []).sorted { $0.repeatIndex < $1.repeatIndex }
+            // Stable order: repeat index, then input position — Swift's sort
+            // is not guaranteed stable, and duplicate repeat indices (e.g.
+            // concatenated runs) must not make the report input-order-luck.
+            let all = (byCase[toolLoopCase.id] ?? [])
+                .enumerated()
+                .sorted { ($0.element.repeatIndex, $0.offset) < ($1.element.repeatIndex, $1.offset) }
+                .map(\.element)
+            // Errored episodes are holes, not measurements — score only the
+            // clean ones (absence ≠ failure, ORIGINS #3).
+            let entries = all.filter { $0.error == nil }
             let repeats = entries.map { score(entry: $0, against: toolLoopCase.expect) }
             let deterministic = entries.allSatisfy {
                 $0.events == entries[0].events && $0.finalText == entries[0].finalText
@@ -114,6 +139,7 @@ public struct ToolLoopLane: Sendable {
             return CaseResult(
                 caseID: toolLoopCase.id,
                 repeats: repeats,
+                erroredRepeats: all.count - entries.count,
                 deterministic: deterministic
             )
         }

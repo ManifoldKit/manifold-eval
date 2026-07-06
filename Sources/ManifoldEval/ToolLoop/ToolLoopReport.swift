@@ -28,9 +28,12 @@ public enum ToolLoopReport {
         lines.append("|------|-----------|-------------|--------------|---------|-------------|---------|")
 
         for caseResult in result.caseResults {
+            let erroredSuffix = caseResult.erroredRepeats > 0
+                ? " (+\(caseResult.erroredRepeats) errored)"
+                : ""
             if caseResult.missing {
                 lines.append(
-                    "| `\(caseResult.caseID)` | — | — | — | 0 | — | ⚠ not measured |"
+                    "| `\(caseResult.caseID)` | — | — | — | 0\(erroredSuffix) | — | ⚠ not measured |"
                 )
                 continue
             }
@@ -43,7 +46,7 @@ public enum ToolLoopReport {
                 + "| \(axisCell(repeats.map(\.firstCallOK))) "
                 + "| \(axisCell(repeats.map(\.chainedOK))) "
                 + "| \(axisCell(repeats.map(\.answerOK))) "
-                + "| \(repeats.count) "
+                + "| \(repeats.count)\(erroredSuffix) "
                 + "| \(determinism) "
                 + "| \(caseResult.passed ? "✓ pass" : "✗ fail") |"
             )
@@ -52,11 +55,14 @@ public enum ToolLoopReport {
         lines.append("")
         lines.append("## Summary")
         lines.append("")
-        lines.append("- Passed: **\(result.passed)/\(result.total)** case(s)")
+        // The denominator is MEASURED cases: a hole beside the rate, never
+        // inside it.
+        lines.append("- Passed: **\(result.passed)/\(result.measured)** measured case(s)")
         if result.missing > 0 {
             lines.append(
-                "- ⚠ \(result.missing) case(s) have no transcript — reported as *not measured*, "
-                + "never folded into the pass rate as a measured zero."
+                "- ⚠ \(result.missing) of \(result.total) case(s) not measured (no transcript, or"
+                + " errored/timed-out episodes only) — excluded from the pass rate, never a measured"
+                + " zero."
             )
         }
         if result.variant > 0 {

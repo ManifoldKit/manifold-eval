@@ -33,7 +33,17 @@ public enum ToolLoopCorpus {
         for rawLine in String(decoding: data, as: UTF8.self).split(whereSeparator: \.isNewline) {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
             guard !line.isEmpty else { continue }
-            cases.append(try decoder.decode(ToolLoopCase.self, from: Data(line.utf8)))
+            let loaded = try decoder.decode(ToolLoopCase.self, from: Data(line.utf8))
+            // An expectation-less case would pass vacuously — reject it at
+            // the boundary rather than let a typo'd corpus report fake green.
+            guard loaded.expect.firstCall != nil
+                || loaded.expect.chainedCall != nil
+                || !loaded.expect.finalAnswerMustContain.isEmpty else {
+                throw ToolLoopError.invalidCase(
+                    loaded.id, "specifies no expectation axis — it would pass vacuously"
+                )
+            }
+            cases.append(loaded)
         }
         return cases
     }
@@ -127,11 +137,22 @@ public enum ToolLoopCorpus {
                     parameters: objectSchema(["email": "The customer's email address"], required: ["email"]),
                     script: ToolScript(result: #"{"account_id":"ACC-77120"}"#)
                 ),
+                // Gated on the sentinel: any other argument gets an error
+                // payload, exactly as a real API would. This is load-bearing
+                // twice over — the sentinel (and the balance) must not leak
+                // to an episode that never threaded it, and a broken chain
+                // must produce a visibly broken answer, not a lucky one.
                 ScriptedToolSpec(
                     name: "get_balance",
                     description: "Fetch the current balance for an account by account id.",
                     parameters: objectSchema(["account_id": "The account id, e.g. ACC-12345"], required: ["account_id"]),
-                    script: ToolScript(result: #"{"account_id":"ACC-77120","balance":"482.15","currency":"AUD"}"#)
+                    script: ToolScript(
+                        result: #"{"error":"unknown account_id"}"#,
+                        argumentKey: "account_id",
+                        resultsByArgument: [
+                            "ACC-77120": #"{"account_id":"ACC-77120","balance":"482.15","currency":"AUD"}"#,
+                        ]
+                    )
                 ),
             ],
             expect: ToolLoopExpectations(
@@ -152,11 +173,18 @@ public enum ToolLoopCorpus {
                     parameters: objectSchema(["name": "The passenger's full name"], required: ["name"]),
                     script: ToolScript(result: #"{"booking_ref":"ZXQ-9917"}"#)
                 ),
+                // Sentinel-gated — see get_balance above.
                 ScriptedToolSpec(
                     name: "get_seat",
                     description: "Fetch the seat assignment for a booking by booking reference.",
                     parameters: objectSchema(["booking_ref": "The booking reference, e.g. ABC-1234"], required: ["booking_ref"]),
-                    script: ToolScript(result: #"{"booking_ref":"ZXQ-9917","seat":"41F"}"#)
+                    script: ToolScript(
+                        result: #"{"error":"unknown booking_ref"}"#,
+                        argumentKey: "booking_ref",
+                        resultsByArgument: [
+                            "ZXQ-9917": #"{"booking_ref":"ZXQ-9917","seat":"41F"}"#,
+                        ]
+                    )
                 ),
             ],
             expect: ToolLoopExpectations(
@@ -177,11 +205,18 @@ public enum ToolLoopCorpus {
                     parameters: objectSchema(["user": "The username"], required: ["user"]),
                     script: ToolScript(result: #"{"user":"rory","city":"Wagga Wagga"}"#)
                 ),
+                // Sentinel-gated — see get_balance above.
                 ScriptedToolSpec(
                     name: "get_forecast",
                     description: "Fetch tomorrow's weather forecast for a city.",
                     parameters: objectSchema(["city": "The city name"], required: ["city"]),
-                    script: ToolScript(result: #"{"city":"Wagga Wagga","forecast":"hail","high_c":"7"}"#)
+                    script: ToolScript(
+                        result: #"{"error":"unknown city"}"#,
+                        argumentKey: "city",
+                        resultsByArgument: [
+                            "Wagga Wagga": #"{"city":"Wagga Wagga","forecast":"hail","high_c":"7"}"#,
+                        ]
+                    )
                 ),
             ],
             expect: ToolLoopExpectations(

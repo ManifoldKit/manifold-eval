@@ -70,7 +70,7 @@ final class ToolLoopGenerateTests: XCTestCase {
     }
 
     @MainActor
-    func testThrowingEmitRecordsEmptyEntryAndContinues() async {
+    func testThrowingEmitRecordsErrorMarkedEntryAndContinues() async {
         struct Boom: Error {}
         let cases = Array(ToolLoopCorpus.builtin.prefix(2))
         let result = await ToolLoopLane().generateTranscripts(
@@ -85,9 +85,46 @@ final class ToolLoopGenerateTests: XCTestCase {
         )
         XCTAssertEqual(result.entries.count, 2, "an errored episode must not abort the run")
         XCTAssertEqual(result.errored, 1)
-        XCTAssertEqual(result.entries[0].events, [])
-        XCTAssertEqual(result.entries[0].finalText, "")
+        XCTAssertNotNil(
+            result.entries[0].error,
+            "the failure must be recorded ON THE WIRE so the scorer sees a hole, not a miss"
+        )
+        XCTAssertNil(result.entries[1].error)
         XCTAssertEqual(result.entries[1].finalText, "ok")
+    }
+
+    /// The scorer must exclude error-marked entries from measurement: an
+    /// infrastructure failure is a hole, never a capability zero.
+    func testErroredEntriesAreHolesNotMeasuredMisses() {
+        let lane = ToolLoopLane()
+        let chainCase = ToolLoopCorpus.builtin.first { $0.id == "chain_account_1" }!
+        let clean = ToolLoopTranscriptEntry(
+            id: chainCase.id, repeatIndex: 0,
+            events: [
+                .call(name: "lookup_account", arguments: #"{"email":"sam@example.com"}"#),
+                .result(content: #"{"account_id":"ACC-77120"}"#),
+                .call(name: "get_balance", arguments: #"{"account_id":"ACC-77120"}"#),
+                .result(content: #"{"account_id":"ACC-77120","balance":"482.15","currency":"AUD"}"#),
+            ],
+            finalText: "Balance: 482.15 AUD"
+        )
+        let errored = ToolLoopTranscriptEntry(
+            id: chainCase.id, repeatIndex: 1, events: [], finalText: "",
+            error: "episode timed out after 180s"
+        )
+
+        // Clean + errored: the errored repeat neither fails the case nor
+        // breaks the determinism comparison.
+        let mixed = lane.score(cases: [chainCase], transcripts: [clean, errored])
+        XCTAssertTrue(mixed.caseResults[0].passed)
+        XCTAssertEqual(mixed.caseResults[0].repeats.count, 1)
+        XCTAssertEqual(mixed.caseResults[0].erroredRepeats, 1)
+
+        // Errored only: not measured — a hole, not a fail.
+        let holeOnly = lane.score(cases: [chainCase], transcripts: [errored])
+        XCTAssertTrue(holeOnly.caseResults[0].missing)
+        XCTAssertFalse(holeOnly.caseResults[0].passed)
+        XCTAssertEqual(holeOnly.measured, 0)
     }
 
     // MARK: - Generate → score round trip (synthetic)

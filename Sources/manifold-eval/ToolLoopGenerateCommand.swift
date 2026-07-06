@@ -108,8 +108,9 @@ enum ToolLoopGenerateCommand {
         // One backend, loaded once, shared across the run (the bfcl-generate
         // construction — see that command for why direct `OllamaBackend`
         // construction is right-sized here). A FRESH InferenceService +
-        // ToolRegistry is built per case so each episode advertises and
-        // dispatches exactly its own scripted tools — no cross-case leakage.
+        // ToolRegistry is built per episode (case × repeat) so each episode
+        // advertises and dispatches exactly its own scripted tools — no
+        // cross-case leakage.
         let ollama = OllamaBackend(urlSession: nil)
         ollama.configure(baseURL: ollamaURL, modelName: ollamaModel)
         do {
@@ -159,7 +160,7 @@ enum ToolLoopGenerateCommand {
                 let service = InferenceService(
                     backend: ollama, name: "ollama", modelName: ollamaModel, toolRegistry: registry
                 )
-                return try await ToolLoopEpisodeDriver.recordEpisode(
+                return await ToolLoopEpisodeDriver.recordEpisode(
                     for: toolLoopCase,
                     repeatIndex: repeatIndex,
                     service: service,
