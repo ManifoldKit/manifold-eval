@@ -23,6 +23,10 @@ import ManifoldTools
 //                         [--bos ID|autoDetect|none] [--cohort sameWeights|sameFamily|cloud] [--out PATH]
 //   manifold-eval dismiss --cell <id> --signature <hex> --reason <text> --ttl <seconds> [--ledger PATH]
 //   manifold-eval dismissals [--ledger PATH] [--prune]
+//   manifold-eval toolloop --responses <transcripts.jsonl> [--corpus <cases.jsonl>] [--title T] [--out PATH]
+//   manifold-eval toolloop-generate --ollama-model <tag> --out <transcripts.jsonl>
+//                         [--corpus <cases.jsonl>] [--repeats N] [--ollama-url URL]
+//                         [--max-tool-iterations N] [--timeout SECONDS]
 
 func die(_ message: String, code: Int32) -> Never {
     FileHandle.standardError.write(Data("error: \(message)\n".utf8))
@@ -59,6 +63,10 @@ guard let subcommand = arguments.first else {
     print("                     [--bos ID|autoDetect|none] [--cohort sameWeights|sameFamily|cloud] [--out PATH]")
     print("  manifold-eval dismiss --cell <id> --signature <hex> --reason <text> --ttl <seconds> [--ledger PATH]")
     print("  manifold-eval dismissals [--ledger PATH] [--prune]")
+    print("  manifold-eval toolloop --responses <transcripts.jsonl> [--corpus <cases.jsonl>] [--title T] [--out PATH]")
+    print("  manifold-eval toolloop-generate --ollama-model <tag> --out <transcripts.jsonl>")
+    print("                     [--corpus <cases.jsonl>] [--repeats N] [--ollama-url URL]")
+    print("                     [--max-tool-iterations N] [--timeout SECONDS]")
     exit(2)
 }
 
@@ -177,10 +185,23 @@ case "dismiss":
 case "dismissals":
     DismissalsCommand.runDismissals(Array(arguments.dropFirst()), die: die, warn: warn)
 
+case "toolloop":
+    // Multi-turn tool-loop conformance scorer (issue #27): offline, scores
+    // pre-recorded episode transcripts against the corpus. Threading logic
+    // lives in ManifoldEval/ToolLoop.
+    ToolLoopCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+
+case "toolloop-generate":
+    // The lane's LIVE consumer: drives Ollama through the real ToolRegistry
+    // dispatch loop (scripted deterministic tools) and records the episode
+    // transcripts `toolloop` scores.
+    await ToolLoopGenerateCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+
 default:
     die(
         "unknown subcommand '\(subcommand)' (expected: collate, diff, ifeval, ifeval-generate, bfcl, "
-            + "bfcl-generate, mteb, regress, baseline, triage, dismiss, dismissals)",
+            + "bfcl-generate, mteb, regress, baseline, triage, dismiss, dismissals, toolloop, "
+            + "toolloop-generate)",
         code: 2
     )
 }
