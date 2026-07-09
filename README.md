@@ -22,7 +22,7 @@ swift build
 swift test          # fixture-driven; no models, no network — hosted-CI safe
 ```
 
-The CLI is a single executable with eight subcommands. Run it with no arguments for usage:
+The CLI is a single executable; run it with no arguments for the full usage list:
 
 ```sh
 swift run manifold-eval
@@ -43,6 +43,8 @@ in hosted CI — see [Running real eval lanes](#running-real-eval-lanes).
 | [`mteb`](#mteb) | Run the MTEB-STS embedding-correlation lane against an Ollama model | **yes** |
 | [`diff`](#diff) | Render a prompt once, drive backends on the *same bytes*, triage divergence | **yes** |
 | [`regress`](#regress) | Replay one prompt across two quants of a model and gate on score movement | **yes** |
+| [`toolloop`](#toolloop--toolloop-generate) | Score recorded multi-turn tool-loop transcripts for tool-result threading | no |
+| [`toolloop-generate`](#toolloop--toolloop-generate) | Drive a live Ollama model through real multi-turn tool dispatch and record transcripts | **yes** |
 
 Each command writes a deterministic Markdown report to stdout, or to a file with `--out`.
 **Diagnostics and progress always go to stderr**, so `--out` (or a stdout redirect) captures a clean
@@ -226,9 +228,61 @@ regression — the gate flags, it does not adjudicate); `3` = indeterminate (a c
 prompt-hash mismatch or unscorable output). See [docs/P4-VERIFICATION.md](docs/P4-VERIFICATION.md)
 for the live same-model cross-quant verification that found a real Q4 correctness loss.
 
+### `toolloop` / `toolloop-generate`
+
+The multi-turn tool-loop conformance lane (issue #27): where `bfcl` scores "did the model call the
+right function" on one shot, this lane scores what happens *after* the call comes back — did the
+tool result **thread** into the next call's arguments and into the final answer? A cell can pass
+single-turn AST scoring and still mis-thread a result on turn 2; this lane is the instrument that
+sees it.
+
+`toolloop-generate` (the live consumer) drives an Ollama model over the corpus with each case's
+**scripted tools registered in a real `ToolRegistry`** — the production dispatch loop executes the
+tools and threads results across turns; only the tool *payloads* are canned (deterministic sentinel
+values like `"K97"` that don't exist in model priors, so a pass proves the model read the threaded
+result). `toolloop` then scores the recorded transcripts offline — no model, hosted-CI safe.
+
+```sh
+# Generate: 8-case built-in scaffold × 3 repeats (the determinism control)
+swift run manifold-eval toolloop-generate --ollama-model mistral-7b-tools:latest \
+    --out transcripts.jsonl
+#   --corpus:              corpus JSONL override (one ToolLoopCase per line); default: built-in scaffold
+#   --repeats:             episodes per case (default 3)
+#   --max-tool-iterations: dispatch-loop turn budget per episode (default 4)
+#   --timeout:             per-episode deadline in seconds (default 180)
+
+# Score exactly what was generated:
+swift run manifold-eval toolloop --responses transcripts.jsonl --out TOOLLOOP.md
+```
+
+Three probe axes per case, each optional (`—` = not probed, never a fake pass/fail): `first call`
+(turn-1 correctness, the BFCL overlap), `chained arg` (a later call must carry a sentinel that
+exists only in an earlier tool result, and must occur *after* that result — a matching call emitted
+before any result couldn't have read it and scores as a miss), and `final answer` (result sentinels
+surface in the answer). Chaining cases' target tools are **sentinel-gated**: any argument other
+than the sentinel gets an error payload, exactly as a real API would — so the sentinel cannot leak
+to an episode that never threaded it, and a broken chain produces a visibly broken answer. A case
+passes only when **every repeat passes every specified axis**; cross-repeat variance at `temp=0`
+is reported as `VARIANT` even when all repeats pass. Episodes that error or time out are recorded
+with an error marker and reported as *not measured* holes — never as capability zeros.
+
+What it catches, concretely: `mistral-7b-tools` (q4_K_M, Ollama) passes all four result→answer
+cases and the multi-call case 3/3 repeats bit-identically — and fails all three chaining cases the
+same way, emitting both calls in one pre-result batch with *placeholder arguments*
+(`get_balance(account_id: "$result.account_id")`): turn-1 scoring on those same episodes is clean,
+so a single-turn lane reads the cell as healthy while the turn-2 chain is broken. `gemma3-4b-tools`
+emits zero structured tool calls on this path (a ```` ```tool_code ```` text block instead) and
+then *hallucinates the tool result* — a measured capability zero for the cell, reported as such,
+never as a harness failure.
+
+Exit codes: `0` = every case measured, passed, and repeated deterministically; `1` = a measured
+threading failure or a `temp=0` VARIANT a human should inspect; `3` = indeterminate — nothing
+matched the corpus, or some cases have only missing/errored episodes (holes gate as reruns, not
+regressions).
+
 ## Running real eval lanes
 
-The model-driven lanes (`mteb`, `diff`, `regress`, `bfcl-generate`, `ifeval-generate`) and the corpus-gated tests need
+The model-driven lanes (`mteb`, `diff`, `regress`, `bfcl-generate`, `ifeval-generate`, `toolloop-generate`) and the corpus-gated tests need
 local models and are gated behind env vars so `swift test` stays hermetic. Fetch the real corpora
 first:
 
@@ -244,6 +298,7 @@ BFCL_GORILLA_CACHE=~/.cache/manifold-eval/bfcl swift test --filter BFCLRealCorpu
 RUN_OLLAMA_EMBED=1 STSB_DATA=~/.cache/manifold-eval/stsb_test.json swift test --filter MTEBRealCorpusTests
 RUN_OLLAMA_LIVE=1 swift test --filter RegressionCrossQuantLiveTests   # needs two quant tags pulled
 RUN_OLLAMA_LIVE=1 OLLAMA_MODEL=qwen2.5-0.5b swift test --filter IFEvalGenerateLiveTests
+RUN_OLLAMA_LIVE=1 OLLAMA_MODEL=mistral-7b-tools:latest swift test --filter ToolLoopGenerateLiveTests
 ```
 
 ## Architecture
