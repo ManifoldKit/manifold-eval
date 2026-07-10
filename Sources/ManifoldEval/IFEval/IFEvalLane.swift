@@ -133,12 +133,12 @@ public struct IFEvalLane: Sendable {
 ///
 /// The `Expected` type is `IFEvalCase` — the ground-truth instruction list.
 /// The output's `visibleText` is the response being scored. The returned
-/// `Score` carries `.bool(allPassed)` as the strict-accuracy verdict and
+/// `EvalScore` carries `.bool(allPassed)` as the strict-accuracy verdict and
 /// encodes per-instruction results in `metadata`.
 extension IFEvalLane: EvalScorer {
     public typealias Expected = IFEvalCase
 
-    public func score(output: EvalRunOutput, expected: IFEvalCase) async -> Score {
+    public func score(output: EvalRunOutput, expected: IFEvalCase) async -> EvalScore {
         let result = evaluate(case: expected, response: output.visibleText)
         var metadata: [String: String] = [:]
         for (id, passed) in zip(expected.instructionIDs, result.instructionResults) {
@@ -148,7 +148,7 @@ extension IFEvalLane: EvalScorer {
             ? "All \(result.instructionResults.count) instructions passed."
             : "Failed: \(zip(expected.instructionIDs, result.instructionResults).filter { !$0.1 }.map(\.0).joined(separator: ", "))"
 
-        return Score(
+        return EvalScore(
             value: .bool(result.allPassed),
             answer: nil,
             explanation: explanation,

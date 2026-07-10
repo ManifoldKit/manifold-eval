@@ -42,7 +42,7 @@ public struct ExactMatchScorer: EvalScorer, Sendable {
         public var trimWhitespace: Bool
 
         /// Fold both strings to lowercase before comparing. Does not affect the
-        /// raw strings stored in `Score.answer` or `Score.explanation`.
+        /// raw strings stored in `EvalScore.answer` or `EvalScore.explanation`.
         public var caseInsensitive: Bool
 
         public init(trimWhitespace: Bool = false, caseInsensitive: Bool = false) {
@@ -67,7 +67,7 @@ public struct ExactMatchScorer: EvalScorer, Sendable {
 
     // MARK: - EvalScorer
 
-    public func score(output: EvalRunOutput, expected: String) async -> Score {
+    public func score(output: EvalRunOutput, expected: String) async -> EvalScore {
         // Read from visibleText, not thinkingText — a scorer must not silently
         // grade on the wrong field. (empty == empty is a deliberate pass; see tests.)
         let rawActual = output.visibleText
@@ -91,7 +91,7 @@ public struct ExactMatchScorer: EvalScorer, Sendable {
 
         let matched = normalizedActual == normalizedExpected
 
-        return Score(
+        return EvalScore(
             value: .bool(matched),
             // `answer` carries the raw model output so the aggregation layer can
             // surface what the model actually said, not the normalized form used
