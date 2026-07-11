@@ -1,8 +1,12 @@
 name: ci
 
-# Cheap gate: build + fixture-driven tests only (no models, no hardware). Mirrors
-# the ManifoldKit family's draft-skip discipline — CI runs only on a non-draft PR
-# or a push to main, so a draft is a zero-CI staging area.
+# Cheap gate: build + fixture-driven tests only (no models, no hardware).
+# Delegates to ManifoldKit/.github's shared swift-ci.yml (mode: spm, defaults).
+# The draft-skip guard now lives inside the reusable workflow itself; the
+# `pull_request: types:` list below (including `ready_for_review`) is still
+# required on the caller side — without it, a PR opened as draft never fires
+# an event this workflow subscribes to when marked ready, so its CI job would
+# never actually run. See ManifoldKit/.github WORKFLOWS.md.
 on:
   push:
     branches: [main]
@@ -10,20 +14,9 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
-  group: build-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
-# Least privilege: the build/test job only reads the tree.
-permissions:
-  contents: read
 
 jobs:
   build-test:
-    if: github.event_name == 'push' || github.event.pull_request.draft == false
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-      - name: Build (incl. tests)
-        run: swift build --build-tests
-      - name: Test
-        run: swift test
+    uses: ManifoldKit/.github/.github/workflows/swift-ci.yml@main
