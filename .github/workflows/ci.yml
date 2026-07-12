@@ -7,11 +7,21 @@ name: ci
 # required on the caller side — without it, a PR opened as draft never fires
 # an event this workflow subscribes to when marked ready, so its CI job would
 # never actually run. See ManifoldKit/.github WORKFLOWS.md.
+#
+# paths-ignore on CHANGELOG.md / .release-please-manifest.json skips this
+# heavy gate on release-please's own PRs and merges (mirrors manifold-mlx /
+# manifold-llama) — those commits touch only version/changelog bookkeeping.
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'CHANGELOG.md'
+      - '.release-please-manifest.json'
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - 'CHANGELOG.md'
+      - '.release-please-manifest.json'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
