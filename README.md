@@ -292,8 +292,8 @@ non-comparable numbers (a "core vs MLX" delta was routinely a 0.5B-vs-4B delta i
 
 A `BenchSpec` pins **one** `model_family` + generation protocol across every lane; every result
 carries that pin's hash (`specHash`), and `perf-bench`'s collator **refuses** to render a matrix
-whose results don't all share one hash — the apples-to-oranges mistake becomes a decode-time error,
-not a silent footgun.
+whose results don't all share one hash — the apples-to-oranges mistake becomes a collation-time
+error, not a silent footgun.
 
 ```sh
 swift run manifold-eval perf-bench --spec perf-spec.json --out PERF-MATRIX.md

@@ -8,9 +8,9 @@ import Foundation
 /// measured whatever model happened to be loaded locally, so a "core vs MLX"
 /// comparison was routinely a 0.5B-vs-4B comparison in disguise. Pinning
 /// `modelFamily` + `protocol` once at the spec level, with every lane required
-/// to claim the same pin, makes that mistake a decode-time/collation-time
-/// error instead of a silent footgun — see ``BenchResult/specHash`` and
-/// ``PerfCollator``'s hard guard.
+/// to claim the same pin, makes that mistake a collation-time error instead
+/// of a silent footgun — see ``BenchResult/specHash`` and ``PerfCollator``'s
+/// hard guard.
 public struct BenchSpec: Codable, Sendable, Equatable {
 
     /// Logical model identity the spec pins, e.g. `"llama-3.1-8b-instruct"`.
