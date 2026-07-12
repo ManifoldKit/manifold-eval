@@ -13,16 +13,19 @@ name: Bump core pin (on ManifoldKit release)
 #
 # Unlike the companion packages (manifold-mlx / manifold-llama), this repo
 # pins ManifoldKit with `exact:` rather than `.upToNextMinor(from:)` — eval
-# tracks core lockstep, not a floor — and has no release-please of its own
-# (deliberate: eval has no downstream release automation to trip). What it
-# does, gated on a real green build:
+# tracks core lockstep, not a floor. Since July 2026 eval has its own
+# release-please (see release-please.yml) so its assurance-surface work is
+# versioned — but pin-bump commits are deliberately `chore:`-typed so they
+# do NOT trip a release: a pin bump changes nothing about eval's own
+# surface, and releases here should cut only from eval's own feat:/fix:
+# work. What this workflow does, gated on a real green build:
 #   1. Rewrite the ManifoldKit `exact: "X.Y.Z"` pin to the new version.
 #      No-op (exits clean) if already at that version — safe to re-dispatch.
 #   2. Re-resolve, build, and test against the new core (the actual gate;
 #      mirrors ci.yml's invocation exactly — fixture tests only, no models).
-#   3. Commit Package.swift + Package.resolved, open a `fix:` PR, and
-#      admin-squash-merge it. The merge is the end state — there is no
-#      further automation to trip.
+#   3. Commit Package.swift + Package.resolved, open a `chore:` PR, and
+#      admin-squash-merge it. The merge is the end state for the bump —
+#      release-please sees the chore: commit and stays quiet.
 #
 # Requires secret RELEASE_AUTOMERGE_TOKEN: a fine-grained PAT on this repo
 # with Contents: read+write and Pull requests: read+write. enforce_admins is
@@ -122,10 +125,13 @@ jobs:
           git config user.email "noreply@github.com"
           git checkout -b "$BRANCH"
           git add Package.swift Package.resolved
-          git commit -m "fix: bump ManifoldKit pin to ${TAG}"
+          # chore: (not fix:) — deliberately release-inert. eval's
+          # release-please must not open a patch release PR for every core
+          # pin bump; see the header comment.
+          git commit -m "chore: bump ManifoldKit pin to ${TAG}"
           git push --force-with-lease origin "$BRANCH"
           PR_URL=$(gh pr create \
-            --title "fix: bump ManifoldKit pin to ${TAG}" \
+            --title "chore: bump ManifoldKit pin to ${TAG}" \
             --body "Automated: ManifoldKit ${TAG} shipped. Pin re-resolved, built, and tested green against the new core." \
             --head "$BRANCH" --base main)
           echo "Opened $PR_URL"
