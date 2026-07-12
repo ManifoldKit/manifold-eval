@@ -27,6 +27,7 @@ import ManifoldTools
 //   manifold-eval toolloop-generate --ollama-model <tag> --out <transcripts.jsonl>
 //                         [--corpus <cases.jsonl>] [--repeats N] [--ollama-url URL]
 //                         [--max-tool-iterations N] [--timeout SECONDS]
+//   manifold-eval perf-bench --spec <spec.json> [--out PERF-MATRIX.md] [--title T]
 
 func die(_ message: String, code: Int32) -> Never {
     FileHandle.standardError.write(Data("error: \(message)\n".utf8))
@@ -67,6 +68,7 @@ guard let subcommand = arguments.first else {
     print("  manifold-eval toolloop-generate --ollama-model <tag> --out <transcripts.jsonl>")
     print("                     [--corpus <cases.jsonl>] [--repeats N] [--ollama-url URL]")
     print("                     [--max-tool-iterations N] [--timeout SECONDS]")
+    print("  manifold-eval perf-bench --spec <spec.json> [--out PERF-MATRIX.md] [--title T]")
     exit(2)
 }
 
@@ -197,11 +199,17 @@ case "toolloop-generate":
     // transcripts `toolloop` scores.
     await ToolLoopGenerateCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
+case "perf-bench":
+    // The perf-harness spine (spec-driven HTTP-driver lanes → collate → render).
+    // Orchestration lives in PerfBenchCommand; the record/collator/report types
+    // live in ManifoldEval/Perf.
+    await PerfBenchCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+
 default:
     die(
         "unknown subcommand '\(subcommand)' (expected: collate, diff, ifeval, ifeval-generate, bfcl, "
             + "bfcl-generate, mteb, regress, baseline, triage, dismiss, dismissals, toolloop, "
-            + "toolloop-generate)",
+            + "toolloop-generate, perf-bench)",
         code: 2
     )
 }

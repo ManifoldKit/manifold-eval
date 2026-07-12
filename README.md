@@ -45,6 +45,7 @@ in hosted CI — see [Running real eval lanes](#running-real-eval-lanes).
 | [`regress`](#regress) | Replay one prompt across two quants of a model and gate on score movement | **yes** |
 | [`toolloop`](#toolloop--toolloop-generate) | Score recorded multi-turn tool-loop transcripts for tool-result threading | no |
 | [`toolloop-generate`](#toolloop--toolloop-generate) | Drive a live Ollama model through real multi-turn tool dispatch and record transcripts | **yes** |
+| [`perf-bench`](#perf-bench) | Drive one spec-pinned model across HTTP lanes (Ollama / OpenAI-compatible) and render a TTFT/TPS matrix | **yes** |
 
 Each command writes a deterministic Markdown report to stdout, or to a file with `--out`.
 **Diagnostics and progress always go to stderr**, so `--out` (or a stdout redirect) captures a clean
@@ -280,6 +281,45 @@ threading failure or a `temp=0` VARIANT a human should inspect; `3` = indetermin
 matched the corpus, or some cases have only missing/errored episodes (holes gate as reruns, not
 regressions).
 
+### `perf-bench`
+
+The local-inference performance harness's spine: **one HTTP driver** measures both `http-openai`
+(SSE `/v1/chat/completions`) and `http-ollama` (NDJSON `/api/generate`) lanes with the same
+instrumentation points, so TTFT and TPS mean the same thing across transports. It replaces an
+ad-hoc predecessor — three separate in-process Swift bench targets (core, `manifold-mlx`,
+`manifold-llama`) that each measured whatever model happened to be loaded locally, producing
+non-comparable numbers (a "core vs MLX" delta was routinely a 0.5B-vs-4B delta in disguise).
+
+A `BenchSpec` pins **one** `model_family` + generation protocol across every lane; every result
+carries that pin's hash (`specHash`), and `perf-bench`'s collator **refuses** to render a matrix
+whose results don't all share one hash — the apples-to-oranges mistake becomes a collation-time
+error, not a silent footgun.
+
+```sh
+swift run manifold-eval perf-bench --spec perf-spec.json --out PERF-MATRIX.md
+```
+
+```json
+{
+  "model_family": "llama-3.1-8b-instruct",
+  "protocol": { "prompt": "...", "temperature": 0.0, "max_tokens": 128, "warmup_runs": 1, "timed_runs": 5 },
+  "lanes": [
+    { "name": "ollama", "transport": "http-ollama", "endpoint": "http://localhost:11434", "model": "llama3.1-8b", "quant": "Q4_K_M" },
+    { "name": "omlx", "transport": "http-openai", "endpoint": "http://127.0.0.1:8000", "model": "Meta-Llama-3.1-8B-Instruct-4bit", "quant": "4bit", "api_key_env": "OMLX_API_KEY" }
+  ]
+}
+```
+
+Each lane runs 1 warmup (discarded) + N timed runs; **lanes always run strictly sequentially**,
+never concurrently — GPU contention between two locally-running engines corrupts throughput numbers,
+so `PerfRunner` has no concurrent code path to opt out of. `api_key_env` names an environment
+variable holding a bearer token (e.g. OMLX's `Authorization: Bearer <key>`) — specs are checked into
+the repo and never carry a secret value directly.
+
+This spine measures HTTP-fronted lanes only. Companion server hosts
+(`manifold-server-mlx`/`manifold-server-llama`, once their `ServerBackendProvider` seam lands in
+ManifoldKit core) and in-process control lanes are follow-ups, not yet wired into this matrix.
+
 ## Running real eval lanes
 
 The model-driven lanes (`mteb`, `diff`, `regress`, `bfcl-generate`, `ifeval-generate`, `toolloop-generate`) and the corpus-gated tests need
@@ -299,6 +339,7 @@ RUN_OLLAMA_EMBED=1 STSB_DATA=~/.cache/manifold-eval/stsb_test.json swift test --
 RUN_OLLAMA_LIVE=1 swift test --filter RegressionCrossQuantLiveTests   # needs two quant tags pulled
 RUN_OLLAMA_LIVE=1 OLLAMA_MODEL=qwen2.5-0.5b swift test --filter IFEvalGenerateLiveTests
 RUN_OLLAMA_LIVE=1 OLLAMA_MODEL=mistral-7b-tools:latest swift test --filter ToolLoopGenerateLiveTests
+RUN_PERF_LIVE=1 swift test --filter PerfHTTPDriverLiveTests   # needs a local Ollama + OpenAI-compatible server
 ```
 
 ## Architecture
@@ -323,6 +364,7 @@ Sources/
     IFEval/, BFCL/, MTEB/             corpus lanes
     Differential/                     diff — prompt rendering, drivers, triage
     Replay/                           regress — RegressionRunner / Gate / Report
+    Perf/                             perf-bench — BenchSpec/Result, HTTP driver, collator, report
 ```
 
 ## Roadmap
@@ -334,6 +376,7 @@ Sources/
 | **P3** | BFCL-full + IFEval + MTEB lanes | ✅ shipped |
 | **P4** | `regress` — replay-regression gate over same-model cross-quant runs | ✅ shipped & verified |
 | **P5** | `core-bump.yml` lockstep automation | ✅ shipped (`workflow_dispatch`-driven until the org dispatch PAT is re-scoped; rot-guard/nightly cadence still deferred) |
+| **P6** | `perf-bench` — spec-driven local-inference perf harness spine (HTTP driver over Ollama/OpenAI-compatible lanes) | ✅ spine shipped; server-host MLX/llama lanes follow once ManifoldKit's `ServerBackendProvider` seam lands |
 
 Design and phasing live in ManifoldKit's `docs/plans/manifold-eval-repo-v2-override.md`.
 

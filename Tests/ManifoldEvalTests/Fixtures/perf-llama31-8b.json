@@ -1,0 +1,27 @@
+{
+  "model_family": "llama-3.1-8b-instruct",
+  "protocol": {
+    "prompt": "Write a three-sentence summary of why the sky is blue.",
+    "temperature": 0.0,
+    "max_tokens": 128,
+    "warmup_runs": 1,
+    "timed_runs": 5
+  },
+  "lanes": [
+    {
+      "name": "ollama",
+      "transport": "http-ollama",
+      "endpoint": "http://localhost:11434",
+      "model": "llama3.1-8b",
+      "quant": "Q4_K_M"
+    },
+    {
+      "name": "omlx",
+      "transport": "http-openai",
+      "endpoint": "http://127.0.0.1:8000",
+      "model": "Meta-Llama-3.1-8B-Instruct-4bit",
+      "quant": "4bit",
+      "api_key_env": "OMLX_API_KEY"
+    }
+  ]
+}
