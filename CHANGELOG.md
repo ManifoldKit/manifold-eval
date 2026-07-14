@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/ManifoldKit/manifold-eval/compare/v0.1.1...v0.1.2) (2026-07-13)
+
+
+### Features
+
+* **perf:** spec-driven local-inference perf harness (HTTP-driver spine) ([#43](https://github.com/ManifoldKit/manifold-eval/issues/43)) ([692c50e](https://github.com/ManifoldKit/manifold-eval/commit/692c50e7b170da21e065e42dbd2ebe0343db559b))
+
 ## [0.1.1](https://github.com/ManifoldKit/manifold-eval/compare/v0.1.0...v0.1.1) (2026-07-12)
 
 First release cut by release-please — manifold-eval now versions its own
