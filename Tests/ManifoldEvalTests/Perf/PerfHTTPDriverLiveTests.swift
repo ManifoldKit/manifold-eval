@@ -25,18 +25,18 @@ final class PerfHTTPDriverLiveTests: XCTestCase {
         let data = try Data(contentsOf: XCTUnwrap(
             Bundle.module.url(forResource: "perf-llama31-8b", withExtension: "json", subdirectory: "Fixtures")
         ))
-        var spec = try JSONDecoder().decode(BenchSpec.self, from: data)
+        let decodedSpec = try JSONDecoder().decode(BenchSpec.self, from: data)
         // Keep the live smoke fast: fewer timed runs than a real report would use.
-        spec = BenchSpec(
-            modelFamily: spec.modelFamily,
-            protocolConfig: .init(
-                prompt: spec.protocolConfig.prompt,
-                temperature: spec.protocolConfig.temperature,
+        let spec = BenchSpec(
+            modelFamily: decodedSpec.modelFamily,
+            protocolConfig: try .init(
+                prompt: decodedSpec.protocolConfig.prompt,
+                temperature: decodedSpec.protocolConfig.temperature,
                 maxTokens: 64,
                 warmupRuns: 1,
                 timedRuns: 3
             ),
-            lanes: spec.lanes
+            lanes: decodedSpec.lanes
         )
 
         let results = try await PerfRunner.runSpec(spec, onProgress: { print($0) })
