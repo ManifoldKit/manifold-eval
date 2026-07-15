@@ -314,7 +314,14 @@ Each lane runs 1 warmup (discarded) + N timed runs; **lanes always run strictly 
 never concurrently — GPU contention between two locally-running engines corrupts throughput numbers,
 so `PerfRunner` has no concurrent code path to opt out of. `api_key_env` names an environment
 variable holding a bearer token (e.g. OMLX's `Authorization: Bearer <key>`) — specs are checked into
-the repo and never carry a secret value directly.
+the repo and never carry a secret value directly. `BenchSpec`'s protocol rejects a nonpositive
+`timed_runs` (and a negative `warmup_runs`) at construction/decode time, and `PerfRunner` checks every
+produced `BenchResult`'s per-run sample counts against it — a lane that silently drops or duplicates a
+timed run fails loud instead of quietly shipping a median over the wrong sample count.
+
+Before running a spec against real hardware, write down your prediction for the TTFT/TPS delta you
+expect — a number that only confirms what you already assumed teaches you nothing about whether the
+harness (or the engine) is actually behaving as understood.
 
 This spine measures HTTP-fronted lanes only. Companion server hosts
 (`manifold-server-mlx`/`manifold-server-llama`, once their `ServerBackendProvider` seam lands in

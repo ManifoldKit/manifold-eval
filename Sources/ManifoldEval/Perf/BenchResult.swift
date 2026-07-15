@@ -1,5 +1,22 @@
 import Foundation
 
+/// Thrown by ``BenchResult/validate(_:expectedTimedRuns:)`` — the perf twin
+/// of leet-llm P044's `ProfilingError.unexpectedSampleCount`: a per-run
+/// sample array whose length doesn't match the spec's `timed_runs` means a
+/// lane silently dropped (or duplicated) a measured run somewhere in the
+/// driver, and a median computed over the wrong sample count is worse than
+/// no number at all.
+public enum BenchResultValidationError: Error, CustomStringConvertible, Equatable {
+    case sampleCountMismatch(field: String, expected: Int, actual: Int)
+
+    public var description: String {
+        switch self {
+        case let .sampleCountMismatch(field, expected, actual):
+            return "\(field) expected \(expected) sample(s) (timed_runs); received \(actual)"
+        }
+    }
+}
+
 /// One lane's measured outcome for a ``BenchSpec`` run — the perf twin of
 /// `ManifoldTools.ConformanceRecord`. It is a *separate* type, not a reuse of
 /// `ConformanceRecord`: that schema's fields (scenario, decoyLevel, verdict,
@@ -75,6 +92,24 @@ public struct BenchResult: Codable, Sendable, Equatable {
         self.specHash = specHash
         self.hardware = hardware
         self.runAlone = runAlone
+    }
+
+    /// Checks that every per-run sample array on `result` carries exactly
+    /// `expectedTimedRuns` entries (the spec's `protocol.timed_runs`).
+    /// `PerfRunner` calls this on every result it produces before returning
+    /// it — mirrors `P044ProfilingContract.validate(report, for: request)`:
+    /// a completed measurement is checked against the request that shaped
+    /// it, rather than trusted just because it typechecks.
+    public static func validate(_ result: BenchResult, expectedTimedRuns: Int) throws {
+        let fields: [(name: String, count: Int)] = [
+            ("ttft_ms_per_run", result.ttftMsPerRun.count),
+            ("tps_per_run", result.tpsPerRun.count),
+            ("tokens_per_run", result.tokensPerRun.count),
+        ]
+        for field in fields where field.count != expectedTimedRuns {
+            throw BenchResultValidationError.sampleCountMismatch(
+                field: field.name, expected: expectedTimedRuns, actual: field.count)
+        }
     }
 
     static func median(_ values: [Double]) -> Double {

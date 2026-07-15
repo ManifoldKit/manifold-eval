@@ -60,7 +60,7 @@ public enum PerfRunner {
             tokens.append(measurement.tokens)
         }
 
-        return BenchResult(
+        let result = BenchResult(
             lane: lane.name,
             transport: lane.transport,
             engine: engineName(for: lane.transport),
@@ -73,6 +73,11 @@ public enum PerfRunner {
             hardware: hardware,
             runAlone: true
         )
+        // A lane that silently dropped or duplicated a timed run would
+        // otherwise typecheck fine and report a median over the wrong sample
+        // count — fail loud here instead of trusting the driver's loop.
+        try BenchResult.validate(result, expectedTimedRuns: protocolConfig.timedRuns)
+        return result
     }
 
     /// Best-effort engine label from the transport — a spec's lane `name` is

@@ -1,5 +1,25 @@
 import Foundation
 
+/// Errors thrown by ``BenchSpec/GenerationProtocol``'s validated initializer
+/// — the perf twin of leet-llm P044's `ProfilingError`: a warmup/timed-run
+/// count that can't be run at all is a construction-time error, not a
+/// convention a spec author has to remember to honor. Caught here instead of
+/// at `PerfRunner`'s `for 0..<count` loop, which would otherwise just run
+/// zero timed iterations and report a median of an empty array in silence.
+public enum BenchSpecValidationError: Error, CustomStringConvertible, Equatable {
+    case invalidWarmupRuns(Int)
+    case invalidTimedRuns(Int)
+
+    public var description: String {
+        switch self {
+        case let .invalidWarmupRuns(value):
+            return "warmup_runs must be nonnegative; received \(value)"
+        case let .invalidTimedRuns(value):
+            return "timed_runs must be positive; received \(value)"
+        }
+    }
+}
+
 /// The declarative unit the perf harness drives: ONE model family measured
 /// under ONE generation protocol across N HTTP lanes.
 ///
@@ -44,7 +64,13 @@ public struct BenchSpec: Codable, Sendable, Equatable {
         public let warmupRuns: Int
         public let timedRuns: Int
 
-        public init(prompt: String, temperature: Double, maxTokens: Int, warmupRuns: Int, timedRuns: Int) {
+        /// Validates `warmupRuns`/`timedRuns` before storing them — every
+        /// `GenerationProtocol` in memory is therefore already known-runnable;
+        /// there is no separate "call validate() before use" step to forget.
+        public init(
+            prompt: String, temperature: Double, maxTokens: Int, warmupRuns: Int, timedRuns: Int
+        ) throws {
+            try Self.validate(warmupRuns: warmupRuns, timedRuns: timedRuns)
             self.prompt = prompt
             self.temperature = temperature
             self.maxTokens = maxTokens
@@ -58,6 +84,31 @@ public struct BenchSpec: Codable, Sendable, Equatable {
             case maxTokens = "max_tokens"
             case warmupRuns = "warmup_runs"
             case timedRuns = "timed_runs"
+        }
+
+        /// Custom `Decodable` conformance (rather than the synthesized one)
+        /// so a spec JSON fixture is routed through the same validation as
+        /// in-code construction — a hand-edited `perf-spec.json` with
+        /// `"timed_runs": 0` fails to decode instead of silently producing
+        /// an empty-sample report.
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            try self.init(
+                prompt: try container.decode(String.self, forKey: .prompt),
+                temperature: try container.decode(Double.self, forKey: .temperature),
+                maxTokens: try container.decode(Int.self, forKey: .maxTokens),
+                warmupRuns: try container.decode(Int.self, forKey: .warmupRuns),
+                timedRuns: try container.decode(Int.self, forKey: .timedRuns)
+            )
+        }
+
+        private static func validate(warmupRuns: Int, timedRuns: Int) throws {
+            guard warmupRuns >= 0 else {
+                throw BenchSpecValidationError.invalidWarmupRuns(warmupRuns)
+            }
+            guard timedRuns > 0 else {
+                throw BenchSpecValidationError.invalidTimedRuns(timedRuns)
+            }
         }
     }
 
