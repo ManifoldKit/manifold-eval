@@ -29,7 +29,7 @@ let package = Package(
         // (the coreCommit guard is meaningless if the consumer drifts). core-bump.yml
         // bumps this exact version on each core release (plan §10). v0.63.0 is the
         // first tag carrying the ConformanceRecord / MatrixRenderer surface P1 uses.
-        .package(url: "https://github.com/ManifoldKit/ManifoldKit.git", exact: "0.72.0"),
+        .package(url: "https://github.com/ManifoldKit/ManifoldKit.git", exact: "0.73.0"),
     ],
     targets: [
         .target(
