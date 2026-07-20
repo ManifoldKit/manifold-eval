@@ -27,6 +27,19 @@ public enum BenchResultValidationError: Error, CustomStringConvertible, Equatabl
 /// renderer (see ``PerfCollator`` and ``PerfMatrixReport``).
 public struct BenchResult: Codable, Sendable, Equatable {
 
+    /// Schema version of this record's on-disk/wire shape. Bump whenever a
+    /// field is added, removed, or changes meaning, so a published corpus of
+    /// JSON records (see `--json-out`) can be read back knowing which shape
+    /// produced it, instead of guessing from field presence. Records
+    /// produced before this field existed decode as version `1` (the
+    /// original shape) via ``init(from:)``'s `decodeIfPresent` fallback.
+    public let schemaVersion: Int
+
+    /// The current schema version — every ``BenchResult`` this harness
+    /// constructs carries this value unless a caller overrides it (tests
+    /// only; production code should never need to).
+    public static let currentSchemaVersion = 1
+
     /// The spec lane name this result measures, e.g. `"ollama"`, `"omlx"`.
     public let lane: String
     public let transport: BenchSpec.Transport
@@ -51,6 +64,15 @@ public struct BenchResult: Codable, Sendable, Equatable {
 
     public let medianTtftMs: Double
     public let medianTps: Double
+    /// 90th/99th percentile TTFT and TPS across the timed-run samples —
+    /// median alone hides tail behavior a publication-grade number needs to
+    /// show (a lane with a fast median but a long p99 tail is a materially
+    /// different result from one with both tight). Computed via
+    /// ``percentile(_:_:)`` (nearest-rank), same sample arrays as the median.
+    public let p90TtftMs: Double
+    public let p99TtftMs: Double
+    public let p90Tps: Double
+    public let p99Tps: Double
 
     /// ``BenchSpec/specHash`` of the spec this result was produced from — the
     /// load-bearing field the collator's hard guard checks before comparing
@@ -66,6 +88,18 @@ public struct BenchResult: Codable, Sendable, Equatable {
     /// the guarantee held, not just assume it did.
     public let runAlone: Bool
 
+    /// Best-effort engine/server version string (e.g. Ollama's `/api/version`
+    /// response), fetched once per lane outside the timed measurement window.
+    /// `nil` when the transport exposes no reliable version endpoint (generic
+    /// OpenAI-compatible servers don't standardize one) or the probe failed —
+    /// this is provenance, not a load-bearing measurement, so a probe failure
+    /// must never fail the bench run itself.
+    public let engineVersion: String?
+    /// Best-effort model weights digest, when the transport exposes one
+    /// (Ollama's `/api/tags` entries carry a content digest). `nil` for
+    /// transports with no equivalent, or on probe failure.
+    public let modelDigest: String?
+
     public init(
         lane: String,
         transport: BenchSpec.Transport,
@@ -77,8 +111,12 @@ public struct BenchResult: Codable, Sendable, Equatable {
         tokensPerRun: [Int],
         specHash: String,
         hardware: HardwareSnapshot,
-        runAlone: Bool
+        runAlone: Bool,
+        schemaVersion: Int = BenchResult.currentSchemaVersion,
+        engineVersion: String? = nil,
+        modelDigest: String? = nil
     ) {
+        self.schemaVersion = schemaVersion
         self.lane = lane
         self.transport = transport
         self.engine = engine
@@ -89,9 +127,57 @@ public struct BenchResult: Codable, Sendable, Equatable {
         self.tokensPerRun = tokensPerRun
         self.medianTtftMs = Self.median(ttftMsPerRun)
         self.medianTps = Self.median(tpsPerRun)
+        self.p90TtftMs = Self.percentile(ttftMsPerRun, 0.90)
+        self.p99TtftMs = Self.percentile(ttftMsPerRun, 0.99)
+        self.p90Tps = Self.percentile(tpsPerRun, 0.90)
+        self.p99Tps = Self.percentile(tpsPerRun, 0.99)
         self.specHash = specHash
         self.hardware = hardware
         self.runAlone = runAlone
+        self.engineVersion = engineVersion
+        self.modelDigest = modelDigest
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, lane, transport, engine, model, quant
+        case ttftMsPerRun, tpsPerRun, tokensPerRun
+        case medianTtftMs, medianTps, p90TtftMs, p99TtftMs, p90Tps, p99Tps
+        case specHash, hardware, runAlone, engineVersion, modelDigest
+    }
+
+    /// Custom `Decodable` conformance so a record written before
+    /// `schemaVersion` existed (or before the percentile fields existed)
+    /// still decodes: `schemaVersion` defaults to `1`, and the percentiles
+    /// fall back to recomputing from the per-run sample arrays rather than
+    /// failing to decode entirely.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        lane = try container.decode(String.self, forKey: .lane)
+        transport = try container.decode(BenchSpec.Transport.self, forKey: .transport)
+        engine = try container.decode(String.self, forKey: .engine)
+        model = try container.decode(String.self, forKey: .model)
+        quant = try container.decode(String.self, forKey: .quant)
+        ttftMsPerRun = try container.decode([Double].self, forKey: .ttftMsPerRun)
+        tpsPerRun = try container.decode([Double].self, forKey: .tpsPerRun)
+        tokensPerRun = try container.decode([Int].self, forKey: .tokensPerRun)
+        medianTtftMs = try container.decodeIfPresent(Double.self, forKey: .medianTtftMs)
+            ?? Self.median(ttftMsPerRun)
+        medianTps = try container.decodeIfPresent(Double.self, forKey: .medianTps)
+            ?? Self.median(tpsPerRun)
+        p90TtftMs = try container.decodeIfPresent(Double.self, forKey: .p90TtftMs)
+            ?? Self.percentile(ttftMsPerRun, 0.90)
+        p99TtftMs = try container.decodeIfPresent(Double.self, forKey: .p99TtftMs)
+            ?? Self.percentile(ttftMsPerRun, 0.99)
+        p90Tps = try container.decodeIfPresent(Double.self, forKey: .p90Tps)
+            ?? Self.percentile(tpsPerRun, 0.90)
+        p99Tps = try container.decodeIfPresent(Double.self, forKey: .p99Tps)
+            ?? Self.percentile(tpsPerRun, 0.99)
+        specHash = try container.decode(String.self, forKey: .specHash)
+        hardware = try container.decode(HardwareSnapshot.self, forKey: .hardware)
+        runAlone = try container.decode(Bool.self, forKey: .runAlone)
+        engineVersion = try container.decodeIfPresent(String.self, forKey: .engineVersion)
+        modelDigest = try container.decodeIfPresent(String.self, forKey: .modelDigest)
     }
 
     /// Checks that every per-run sample array on `result` carries exactly
@@ -120,5 +206,19 @@ public struct BenchResult: Codable, Sendable, Equatable {
             return (sorted[mid - 1] + sorted[mid]) / 2
         }
         return sorted[mid]
+    }
+
+    /// Nearest-rank percentile: sorts `values` and picks the element at
+    /// `ceil(fraction * n)` (clamped into range). Simple and deterministic —
+    /// no interpolation — which matches this harness's "advisory, directional
+    /// number" posture (see `PerfMatrixReport`'s caveats section) rather than
+    /// claiming statistical precision the small timed-run sample sizes (often
+    /// single-digit `timed_runs`) can't actually support.
+    static func percentile(_ values: [Double], _ fraction: Double) -> Double {
+        guard !values.isEmpty else { return 0 }
+        let sorted = values.sorted()
+        let rank = Int((fraction * Double(sorted.count)).rounded(.up))
+        let index = min(max(rank - 1, 0), sorted.count - 1)
+        return sorted[index]
     }
 }

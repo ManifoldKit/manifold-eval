@@ -44,6 +44,11 @@ public enum PerfRunner {
     ) async throws -> BenchResult {
         let protocolConfig = spec.protocolConfig
 
+        // Provenance is fetched once, before any warmup/timed run — an
+        // extra HTTP round trip inside the timed window would perturb the
+        // very measurement it's meant to describe.
+        let provenance = await driver.fetchProvenance(lane: lane)
+
         for warmupIndex in 0..<max(0, protocolConfig.warmupRuns) {
             onProgress("perf: lane '\(lane.name)' warmup \(warmupIndex + 1)/\(protocolConfig.warmupRuns) (discarded)")
             _ = try await driver.run(lane: lane, protocolConfig: protocolConfig)
@@ -71,7 +76,9 @@ public enum PerfRunner {
             tokensPerRun: tokens,
             specHash: spec.specHash,
             hardware: hardware,
-            runAlone: true
+            runAlone: true,
+            engineVersion: provenance.engineVersion,
+            modelDigest: provenance.modelDigest
         )
         // A lane that silently dropped or duplicated a timed run would
         // otherwise typecheck fine and report a median over the wrong sample
