@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/ManifoldKit/manifold-eval/compare/v0.1.2...v0.1.3) (2026-07-20)
+
+
+### Features
+
+* **perf:** validate bench protocol and result sample counts ([#48](https://github.com/ManifoldKit/manifold-eval/issues/48)) ([1d40b07](https://github.com/ManifoldKit/manifold-eval/commit/1d40b0717b23efc21439d697cec822f16e3bba37))
+
 ## [0.1.2](https://github.com/ManifoldKit/manifold-eval/compare/v0.1.1...v0.1.2) (2026-07-13)
 
 
