@@ -68,11 +68,38 @@ public struct BenchResult: Codable, Sendable, Equatable {
     /// median alone hides tail behavior a publication-grade number needs to
     /// show (a lane with a fast median but a long p99 tail is a materially
     /// different result from one with both tight). Computed via
-    /// ``percentile(_:_:)`` (nearest-rank), same sample arrays as the median.
+    /// ``percentile(_:_:)`` (nearest-rank: `sorted[ceil(fraction * n) - 1]`,
+    /// no interpolation — see that function's doc comment).
+    ///
+    /// **Read `percentilesAreDegenerate`/`p90Rank`/`p99Rank` before trusting
+    /// these at small sample sizes.** Nearest-rank makes `p99TtftMs` /
+    /// `p99Tps` literally equal `max(samples)` for every `n < 100`
+    /// (`ceil(0.99 * n) == n` whenever `n <= 99`), and at `n <= 5` it makes
+    /// `p90` equal `p99` equal the max as well (`ceil(0.90 * 5) ==
+    /// ceil(0.99 * 5) == 5`). A report with `timed_runs: 5` — the repo's own
+    /// example fixture — publishes the same slowest-run number under three
+    /// different labels (`p90`, `p99`, and implicitly `max`) unless it reads
+    /// the degeneracy flag and says so. Raising `timed_runs` to 30 makes p90
+    /// genuine (rank 27 of 30) while p99 is still the max; p99 only becomes a
+    /// real percentile (not the max) at `timed_runs >= 100`.
     public let p90TtftMs: Double
     public let p99TtftMs: Double
     public let p90Tps: Double
     public let p99Tps: Double
+    /// 1-based nearest-rank index into the sorted timed-run samples that
+    /// `p90TtftMs`/`p90Tps` resolved to, for this result's sample count.
+    /// Exposed on the record — not just derivable by recomputing — so a
+    /// report or downstream consumer can tell whether p90/p99 are distinct
+    /// samples WITHOUT re-deriving the rank arithmetic itself.
+    public let p90Rank: Int
+    /// 1-based nearest-rank index `p99TtftMs`/`p99Tps` resolved to.
+    public let p99Rank: Int
+    /// `true` when `p90Rank == p99Rank` — i.e. the "p99" figure is not a
+    /// distinct tail estimate, it is the exact same sample as "p90" (and, for
+    /// `n < 100`, also the sample maximum). A consumer/report MUST check this
+    /// before printing p90/p99 as if they were two independent measurements;
+    /// see the doc comment on `p90TtftMs` for the exact thresholds.
+    public var percentilesAreDegenerate: Bool { p90Rank == p99Rank }
 
     /// ``BenchSpec/specHash`` of the spec this result was produced from — the
     /// load-bearing field the collator's hard guard checks before comparing
@@ -131,6 +158,11 @@ public struct BenchResult: Codable, Sendable, Equatable {
         self.p99TtftMs = Self.percentile(ttftMsPerRun, 0.99)
         self.p90Tps = Self.percentile(tpsPerRun, 0.90)
         self.p99Tps = Self.percentile(tpsPerRun, 0.99)
+        // Ranks are derived from ttftMsPerRun's count; tpsPerRun/tokensPerRun
+        // are required (via BenchResult.validate) to carry the same count, so
+        // one rank pair describes all four percentile fields above.
+        self.p90Rank = Self.rank(for: 0.90, count: ttftMsPerRun.count)
+        self.p99Rank = Self.rank(for: 0.99, count: ttftMsPerRun.count)
         self.specHash = specHash
         self.hardware = hardware
         self.runAlone = runAlone
@@ -141,15 +173,15 @@ public struct BenchResult: Codable, Sendable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, lane, transport, engine, model, quant
         case ttftMsPerRun, tpsPerRun, tokensPerRun
-        case medianTtftMs, medianTps, p90TtftMs, p99TtftMs, p90Tps, p99Tps
+        case medianTtftMs, medianTps, p90TtftMs, p99TtftMs, p90Tps, p99Tps, p90Rank, p99Rank
         case specHash, hardware, runAlone, engineVersion, modelDigest
     }
 
     /// Custom `Decodable` conformance so a record written before
-    /// `schemaVersion` existed (or before the percentile fields existed)
-    /// still decodes: `schemaVersion` defaults to `1`, and the percentiles
-    /// fall back to recomputing from the per-run sample arrays rather than
-    /// failing to decode entirely.
+    /// `schemaVersion` existed (or before the percentile/rank fields
+    /// existed) still decodes: `schemaVersion` defaults to `1`, and the
+    /// percentiles/ranks fall back to recomputing from the per-run sample
+    /// arrays rather than failing to decode entirely.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
@@ -173,6 +205,10 @@ public struct BenchResult: Codable, Sendable, Equatable {
             ?? Self.percentile(tpsPerRun, 0.90)
         p99Tps = try container.decodeIfPresent(Double.self, forKey: .p99Tps)
             ?? Self.percentile(tpsPerRun, 0.99)
+        p90Rank = try container.decodeIfPresent(Int.self, forKey: .p90Rank)
+            ?? Self.rank(for: 0.90, count: ttftMsPerRun.count)
+        p99Rank = try container.decodeIfPresent(Int.self, forKey: .p99Rank)
+            ?? Self.rank(for: 0.99, count: ttftMsPerRun.count)
         specHash = try container.decode(String.self, forKey: .specHash)
         hardware = try container.decode(HardwareSnapshot.self, forKey: .hardware)
         runAlone = try container.decode(Bool.self, forKey: .runAlone)
@@ -209,16 +245,31 @@ public struct BenchResult: Codable, Sendable, Equatable {
     }
 
     /// Nearest-rank percentile: sorts `values` and picks the element at
-    /// `ceil(fraction * n)` (clamped into range). Simple and deterministic —
-    /// no interpolation — which matches this harness's "advisory, directional
-    /// number" posture (see `PerfMatrixReport`'s caveats section) rather than
-    /// claiming statistical precision the small timed-run sample sizes (often
-    /// single-digit `timed_runs`) can't actually support.
+    /// `rank(for:count:)` (1-based, clamped into range). Simple and
+    /// deterministic — no interpolation — which matches this harness's
+    /// "advisory, directional number" posture (see `PerfMatrixReport`'s
+    /// caveats section) rather than claiming statistical precision the
+    /// small timed-run sample sizes (often single-digit `timed_runs`) can't
+    /// actually support. Deliberately NOT changed to interpolate between
+    /// ranks — that would manufacture a value that was never measured, which
+    /// is worse than the current honest-but-blunt "duplicate of the nearest
+    /// real sample" behavior. See `percentilesAreDegenerate` for how a
+    /// consumer is expected to detect and disclose the small-`n` case where
+    /// nearest-rank collapses p90/p99 onto the same sample instead.
     static func percentile(_ values: [Double], _ fraction: Double) -> Double {
         guard !values.isEmpty else { return 0 }
         let sorted = values.sorted()
-        let rank = Int((fraction * Double(sorted.count)).rounded(.up))
-        let index = min(max(rank - 1, 0), sorted.count - 1)
-        return sorted[index]
+        return sorted[Self.rank(for: fraction, count: sorted.count) - 1]
+    }
+
+    /// The 1-based nearest-rank index `ceil(fraction * count)` resolves to,
+    /// clamped to `[1, count]` (and `0` for an empty sample). Factored out of
+    /// `percentile(_:_:)` so `p90Rank`/`p99Rank` can be exposed on the record
+    /// without recomputing percentile values or re-sorting — the rank only
+    /// depends on the sample COUNT, not the sample values themselves.
+    static func rank(for fraction: Double, count: Int) -> Int {
+        guard count > 0 else { return 0 }
+        let rank = Int((fraction * Double(count)).rounded(.up))
+        return min(max(rank, 1), count)
     }
 }
