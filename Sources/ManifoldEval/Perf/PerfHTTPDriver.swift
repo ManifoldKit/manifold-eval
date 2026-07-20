@@ -41,6 +41,18 @@ public struct SingleRunMeasurement: Sendable, Equatable {
     public var tps: Double { wallSeconds > 0 ? Double(tokens) / wallSeconds : 0 }
 }
 
+/// Best-effort provenance for one lane, fetched once outside the timed
+/// measurement window — see ``PerfHTTPDriver/fetchProvenance(lane:)``.
+public struct LaneProvenance: Sendable, Equatable {
+    public let engineVersion: String?
+    public let modelDigest: String?
+
+    public init(engineVersion: String?, modelDigest: String?) {
+        self.engineVersion = engineVersion
+        self.modelDigest = modelDigest
+    }
+}
+
 /// A single Swift HTTP client that drives BOTH `http-openai` and `http-ollama`
 /// lanes with the same instrumentation points (request-send timestamp,
 /// first-content-byte timestamp, stream-completion timestamp).
@@ -212,6 +224,63 @@ public struct PerfHTTPDriver: Sendable {
         let tokens = evalCount ?? chunkTokenCount
         guard tokens > 0 else { throw PerfDriverError.noTokensProduced }
         return SingleRunMeasurement(ttftMs: ttftMs, tokens: tokens, wallSeconds: wallSeconds)
+    }
+
+    // MARK: - Provenance (best-effort, outside the timed window)
+
+    /// Best-effort engine version + model digest for `lane`, fetched once per
+    /// lane (never per timed run — a provenance probe must not perturb the
+    /// measurement it's describing). Never throws: a probe failure yields
+    /// `nil` fields rather than aborting the bench run, since provenance is
+    /// descriptive metadata, not a load-bearing measurement.
+    public func fetchProvenance(lane: BenchSpec.Lane) async -> LaneProvenance {
+        switch lane.transport {
+        case .httpOllama:
+            async let version = fetchOllamaVersion(lane: lane)
+            async let digest = fetchOllamaModelDigest(lane: lane)
+            return await LaneProvenance(engineVersion: version, modelDigest: digest)
+        default:
+            // Generic OpenAI-compatible servers standardize neither a version
+            // endpoint nor a weights-digest field — `system_fingerprint` is
+            // the closest analog but isn't guaranteed present or stable
+            // across implementations, so we deliberately don't fabricate a
+            // value here rather than guess.
+            return LaneProvenance(engineVersion: nil, modelDigest: nil)
+        }
+    }
+
+    private func fetchOllamaVersion(lane: BenchSpec.Lane) async -> String? {
+        guard let base = URL(string: lane.endpoint) else { return nil }
+        let url = base.appendingPathComponent("api/version")
+        struct VersionResponse: Decodable { let version: String }
+        do {
+            let (data, response) = try await session.data(from: url)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                return nil
+            }
+            return try JSONDecoder().decode(VersionResponse.self, from: data).version
+        } catch {
+            return nil
+        }
+    }
+
+    private func fetchOllamaModelDigest(lane: BenchSpec.Lane) async -> String? {
+        guard let base = URL(string: lane.endpoint) else { return nil }
+        let url = base.appendingPathComponent("api/tags")
+        struct TagsResponse: Decodable {
+            struct ModelEntry: Decodable { let name: String; let digest: String? }
+            let models: [ModelEntry]
+        }
+        do {
+            let (data, response) = try await session.data(from: url)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                return nil
+            }
+            let decoded = try JSONDecoder().decode(TagsResponse.self, from: data)
+            return decoded.models.first { $0.name == lane.model }?.digest
+        } catch {
+            return nil
+        }
     }
 
     // MARK: - Timing helpers

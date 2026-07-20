@@ -73,11 +73,27 @@ final class BenchSpecTests: XCTestCase {
     }
 
     func testSpecHashChangesWithProtocolKnobs() throws {
+        // Only the knobs that change what's being MEASURED (temperature,
+        // max_tokens) are part of workload identity — see
+        // `testSpecHashIsStableAcrossRepCounts` for the sampling-parameter
+        // counter-case.
         let base = try makeSpec()
         XCTAssertNotEqual(base.specHash, try makeSpec(temperature: 0.8).specHash)
         XCTAssertNotEqual(base.specHash, try makeSpec(maxTokens: 256).specHash)
-        XCTAssertNotEqual(base.specHash, try makeSpec(warmupRuns: 2).specHash)
-        XCTAssertNotEqual(base.specHash, try makeSpec(timedRuns: 10).specHash)
+    }
+
+    func testSpecHashIsStableAcrossRepCounts() throws {
+        // Regression test for the specHash landmine: warmup_runs/timed_runs
+        // are SAMPLING parameters, not workload identity. Two specs that
+        // differ only in how many times the identical workload is measured
+        // must share a specHash — otherwise increasing timed_runs on an
+        // established spec orphans every historical record measured under
+        // the old rep count (they'd stop collating as comparable), which
+        // defeats the entire point of publishing repeatable numbers.
+        let base = try makeSpec(warmupRuns: 1, timedRuns: 5)
+        XCTAssertEqual(base.specHash, try makeSpec(warmupRuns: 1, timedRuns: 10).specHash)
+        XCTAssertEqual(base.specHash, try makeSpec(warmupRuns: 3, timedRuns: 5).specHash)
+        XCTAssertEqual(base.specHash, try makeSpec(warmupRuns: 0, timedRuns: 1).specHash)
     }
 
     // MARK: - Protocol validation (P044-style: reject at construction/decode time)

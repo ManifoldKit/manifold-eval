@@ -162,22 +162,35 @@ public struct BenchSpec: Codable, Sendable, Equatable {
     }
 
     /// Canonical string the spec hash is computed over — every field that
-    /// defines "same model, same protocol", nothing lane-specific. Deliberately
-    /// hand-built (not `JSONEncoder`'s output) so key order and float formatting
-    /// can never silently vary hash bytes across Foundation versions.
+    /// defines "same **workload**": model family + the generation parameters
+    /// that change what gets measured (prompt, temperature, max_tokens).
+    /// Deliberately hand-built (not `JSONEncoder`'s output) so key order and
+    /// float formatting can never silently vary hash bytes across Foundation
+    /// versions.
+    ///
+    /// `warmupRuns`/`timedRuns` are deliberately EXCLUDED. They are sampling
+    /// parameters — how many times the identical workload is measured — not
+    /// part of the workload's identity. Hashing them was a landmine: bumping
+    /// `timed_runs` from 5 to 10 reps of the exact same prompt/model/protocol
+    /// changed `specHash`, so ``PerfCollator``'s hard guard would refuse to
+    /// compare the two runs even though they measure the same thing, and any
+    /// increase in rep count silently orphaned every prior record. Two specs
+    /// differing only in `warmupRuns`/`timedRuns` MUST share a `specHash` —
+    /// see `BenchSpecTests.testSpecHashIsStableAcrossRepCounts`.
     public var canonicalHashInput: String {
         [
             "model_family=\(modelFamily)",
             "prompt=\(protocolConfig.prompt)",
             "temperature=\(protocolConfig.temperature)",
             "max_tokens=\(protocolConfig.maxTokens)",
-            "warmup_runs=\(protocolConfig.warmupRuns)",
-            "timed_runs=\(protocolConfig.timedRuns)",
         ].joined(separator: "\n")
     }
 
     /// Stable hash of `canonicalHashInput` — the value every ``BenchResult``
     /// produced from this spec carries, so a collator can prove a set of
-    /// records all came from the same model+protocol without re-parsing specs.
+    /// records all came from the same **workload** (model + prompt +
+    /// temperature + max_tokens) without re-parsing specs. Two results with
+    /// the same `specHash` but different rep counts (`warmupRuns`/`timedRuns`)
+    /// are still comparable — see `canonicalHashInput`'s doc comment.
     public var specHash: String { PromptHash.sha256Hex(of: canonicalHashInput) }
 }

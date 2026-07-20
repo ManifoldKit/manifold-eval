@@ -7,11 +7,14 @@ import ManifoldEval
 ///
 /// Usage:
 ///
-///     manifold-eval perf-bench --spec <spec.json> [--out PERF-MATRIX.md] [--title T]
+///     manifold-eval perf-bench --spec <spec.json> [--out PERF-MATRIX.md] [--title T] [--json-out results.json]
 ///
-/// `--spec`  Path to a ``BenchSpec`` JSON fixture (model_family + protocol + lanes).
-/// `--out`   Path to write the rendered Markdown to. Defaults to stdout.
-/// `--title` Overrides the report's H1 heading.
+/// `--spec`     Path to a ``BenchSpec`` JSON fixture (model_family + protocol + lanes).
+/// `--out`      Path to write the rendered Markdown to. Defaults to stdout.
+/// `--title`    Overrides the report's H1 heading.
+/// `--json-out` Path to write the raw, per-lane ``BenchResult`` records (JSON array) to —
+///              the machine-readable publication artifact alongside the human-readable
+///              Markdown from `--out`.
 enum PerfBenchCommand {
 
     static func run(
@@ -22,6 +25,7 @@ enum PerfBenchCommand {
         var specPath: String?
         var outPath: String?
         var title: String?
+        var jsonOutPath: String?
 
         func value(_ index: inout Int, _ flag: String) -> String {
             index += 1
@@ -39,6 +43,8 @@ enum PerfBenchCommand {
                 outPath = value(&index, token)
             case "--title":
                 title = value(&index, token)
+            case "--json-out":
+                jsonOutPath = value(&index, token)
             default:
                 die("unknown flag '\(token)'", 2)
             }
@@ -77,6 +83,19 @@ enum PerfBenchCommand {
 
         for diagnostic in collated.diagnostics {
             warn("[\(diagnostic.severity.rawValue)] \(diagnostic.message)")
+        }
+
+        if let jsonOutPath {
+            let expandedJSONOutPath = (jsonOutPath as NSString).expandingTildeInPath
+            do {
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                let data = try encoder.encode(results)
+                try data.write(to: URL(fileURLWithPath: expandedJSONOutPath))
+            } catch {
+                die("perf-bench: writing \(jsonOutPath): \(error)", 1)
+            }
+            warn("perf-bench: wrote \(expandedJSONOutPath)  (\(results.count) record(s))")
         }
 
         let markdown = PerfMatrixReport.render(collated, title: title ?? PerfMatrixReport.defaultTitle)
