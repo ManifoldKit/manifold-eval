@@ -66,4 +66,33 @@ final class BenchResultValidationTests: XCTestCase {
             )
         }
     }
+
+    func testEmptyNativeArraysValidateCleanly() throws {
+        // OpenAI-compat (or pre-v2) records leave native arrays empty — that
+        // is valid and must not be treated as a sample-count mismatch.
+        XCTAssertNoThrow(try BenchResult.validate(makeResult(), expectedTimedRuns: 3))
+    }
+
+    func testMismatchedNativeArrayThrows() {
+        let result = BenchResult(
+            lane: "ollama",
+            transport: .httpOllama,
+            engine: "ollama",
+            model: "llama3.1:8b",
+            quant: "Q4_K_M",
+            ttftMsPerRun: [166, 170, 164],
+            tpsPerRun: [22.1, 21.8, 22.4],
+            tokensPerRun: [128, 128, 128],
+            specHash: "hash-a",
+            hardware: hardware,
+            runAlone: true,
+            loadDurationMsPerRun: [10, 11] // length 2 ≠ timed_runs 3
+        )
+        XCTAssertThrowsError(try BenchResult.validate(result, expectedTimedRuns: 3)) { error in
+            XCTAssertEqual(
+                error as? BenchResultValidationError,
+                .sampleCountMismatch(field: "load_duration_ms_per_run", expected: 3, actual: 2)
+            )
+        }
+    }
 }

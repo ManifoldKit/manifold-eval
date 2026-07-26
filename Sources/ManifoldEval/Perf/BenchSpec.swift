@@ -63,12 +63,24 @@ public struct BenchSpec: Codable, Sendable, Equatable {
         public let maxTokens: Int
         public let warmupRuns: Int
         public let timedRuns: Int
+        /// When `true`, the runner forces an Ollama unload (`keep_alive: 0`)
+        /// and records one cold-start measurement (load duration + TTFT +
+        /// native split) *before* warmups/timed warm runs. OpenAI-compatible
+        /// lanes have no unload verb — cold fields stay `nil` there.
+        /// Not part of ``BenchSpec/specHash`` (measurement methodology, not
+        /// workload identity). Defaults to `false` for legacy fixtures.
+        public let measureCold: Bool
 
         /// Validates `warmupRuns`/`timedRuns` before storing them — every
         /// `GenerationProtocol` in memory is therefore already known-runnable;
         /// there is no separate "call validate() before use" step to forget.
         public init(
-            prompt: String, temperature: Double, maxTokens: Int, warmupRuns: Int, timedRuns: Int
+            prompt: String,
+            temperature: Double,
+            maxTokens: Int,
+            warmupRuns: Int,
+            timedRuns: Int,
+            measureCold: Bool = false
         ) throws {
             try Self.validate(warmupRuns: warmupRuns, timedRuns: timedRuns)
             self.prompt = prompt
@@ -76,6 +88,7 @@ public struct BenchSpec: Codable, Sendable, Equatable {
             self.maxTokens = maxTokens
             self.warmupRuns = warmupRuns
             self.timedRuns = timedRuns
+            self.measureCold = measureCold
         }
 
         private enum CodingKeys: String, CodingKey {
@@ -84,6 +97,7 @@ public struct BenchSpec: Codable, Sendable, Equatable {
             case maxTokens = "max_tokens"
             case warmupRuns = "warmup_runs"
             case timedRuns = "timed_runs"
+            case measureCold = "measure_cold"
         }
 
         /// Custom `Decodable` conformance (rather than the synthesized one)
@@ -98,7 +112,8 @@ public struct BenchSpec: Codable, Sendable, Equatable {
                 temperature: try container.decode(Double.self, forKey: .temperature),
                 maxTokens: try container.decode(Int.self, forKey: .maxTokens),
                 warmupRuns: try container.decode(Int.self, forKey: .warmupRuns),
-                timedRuns: try container.decode(Int.self, forKey: .timedRuns)
+                timedRuns: try container.decode(Int.self, forKey: .timedRuns),
+                measureCold: try container.decodeIfPresent(Bool.self, forKey: .measureCold) ?? false
             )
         }
 

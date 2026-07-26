@@ -296,21 +296,30 @@ whose results don't all share one hash — the apples-to-oranges mistake becomes
 error, not a silent footgun.
 
 ```sh
-swift run manifold-eval perf-bench --spec perf-spec.json --out PERF-MATRIX.md
+swift run manifold-eval perf-bench --spec perf-spec.json \
+    --out PERF-MATRIX.md --json-out results.json
 ```
 
 ```json
 {
   "model_family": "llama-3.1-8b-instruct",
-  "protocol": { "prompt": "...", "temperature": 0.0, "max_tokens": 128, "warmup_runs": 1, "timed_runs": 5 },
+  "protocol": {
+    "prompt": "...",
+    "temperature": 0.0,
+    "max_tokens": 128,
+    "warmup_runs": 1,
+    "timed_runs": 5,
+    "measure_cold": true
+  },
   "lanes": [
-    { "name": "ollama", "transport": "http-ollama", "endpoint": "http://localhost:11434", "model": "llama3.1-8b", "quant": "Q4_K_M" },
+    { "name": "ollama", "transport": "http-ollama", "endpoint": "http://localhost:11434", "model": "llama3.1:8b", "quant": "Q4_K_M" },
     { "name": "omlx", "transport": "http-openai", "endpoint": "http://127.0.0.1:8000", "model": "Meta-Llama-3.1-8B-Instruct-4bit", "quant": "4bit", "api_key_env": "OMLX_API_KEY" }
   ]
 }
 ```
 
-Each lane runs 1 warmup (discarded) + N timed runs; **lanes always run strictly sequentially**,
+Each lane runs optional cold-start (`measure_cold`: Ollama unload via `keep_alive: 0` + one measured
+reload), then 1 warmup (discarded) + N timed warm runs; **lanes always run strictly sequentially**,
 never concurrently — GPU contention between two locally-running engines corrupts throughput numbers,
 so `PerfRunner` has no concurrent code path to opt out of. `api_key_env` names an environment
 variable holding a bearer token (e.g. OMLX's `Authorization: Bearer <key>`) — specs are checked into
@@ -319,13 +328,27 @@ the repo and never carry a secret value directly. `BenchSpec`'s protocol rejects
 produced `BenchResult`'s per-run sample counts against it — a lane that silently drops or duplicates a
 timed run fails loud instead of quietly shipping a median over the wrong sample count.
 
+**Native metrics (schema v2).** Ollama's final chunk already carries `load_duration`,
+`prompt_eval_count`/`prompt_eval_duration`, and `eval_count`/`eval_duration` — the driver records
+them as per-run `loadDurationMs` / `prefillTps` / `generateTps`. OpenAI-compatible lanes derive
+decode tok/s as `tokens / (wall − TTFT)`. Wall TPS remains **prefill-included** for continuity with
+retired in-process benches; the report's native-split table carries the decode-only figure.
+
+**Percentile policy.** Publish median + min/max always; p90 only at `timed_runs ≥ 20`; p99 only at
+`timed_runs ≥ 100`. Prefer a *latency* spec (20+ reps, tiny `max_tokens`) and a *throughput* spec
+(5 reps, 256+ tokens) rather than one undersampled run that pretends to publish p99.
+
+`--json-out` writes the raw per-lane `BenchResult` array (pretty JSON, sorted keys) for publication
+under a consumer repo's `docs/perf/`.
+
 Before running a spec against real hardware, write down your prediction for the TTFT/TPS delta you
 expect — a number that only confirms what you already assumed teaches you nothing about whether the
 harness (or the engine) is actually behaving as understood.
 
-This spine measures HTTP-fronted lanes only. Companion server hosts
-(`manifold-server-mlx`/`manifold-server-llama`, once their `ServerBackendProvider` seam lands in
-ManifoldKit core) and in-process control lanes are follow-ups, not yet wired into this matrix.
+This spine measures HTTP-fronted lanes only. Peak/steady-state memory and cancellation latency need
+process ownership / in-process cancel (gated on ManifoldKit #2245 companion server hosts and a core
+E2E suite). Companion server hosts (`manifold-server-mlx`/`manifold-server-llama`) and in-process
+control lanes are follow-ups, not yet wired into this matrix.
 
 ## Running real eval lanes
 
