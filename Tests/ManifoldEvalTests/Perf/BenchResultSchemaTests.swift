@@ -37,11 +37,11 @@ final class BenchResultSchemaTests: XCTestCase {
 
     func testDefaultSchemaVersionIsCurrentSchemaVersion() {
         XCTAssertEqual(makeResult().schemaVersion, BenchResult.currentSchemaVersion)
-        XCTAssertEqual(BenchResult.currentSchemaVersion, 1)
+        XCTAssertEqual(BenchResult.currentSchemaVersion, 2)
     }
 
     func testSchemaVersionRoundTripsThroughJSON() throws {
-        let result = makeResult(schemaVersion: 1, engineVersion: "0.3.14", modelDigest: "sha256:abc123")
+        let result = makeResult(schemaVersion: 2, engineVersion: "0.3.14", modelDigest: "sha256:abc123")
         let data = try JSONEncoder().encode(result)
         let decoded = try JSONDecoder().decode(BenchResult.self, from: data)
         XCTAssertEqual(decoded, result)
@@ -185,5 +185,98 @@ final class BenchResultSchemaTests: XCTestCase {
         let decoded = try JSONDecoder().decode(BenchResult.self, from: data)
         XCTAssertEqual(decoded.engineVersion, "0.3.14")
         XCTAssertEqual(decoded.modelDigest, "sha256:abc123")
+    }
+
+    // MARK: - Native split + min/max + cold (schema v2)
+
+    func testMinMaxComputedFromSamples() {
+        let result = makeResult(
+            ttftMsPerRun: [100, 200, 300, 400, 500],
+            tpsPerRun: [10, 20, 30, 40, 50]
+        )
+        XCTAssertEqual(result.minTtftMs, 100)
+        XCTAssertEqual(result.maxTtftMs, 500)
+        XCTAssertEqual(result.minTps, 10)
+        XCTAssertEqual(result.maxTps, 50)
+    }
+
+    func testNativeSplitMediansIgnoreNils() {
+        let result = BenchResult(
+            lane: "ollama",
+            transport: .httpOllama,
+            engine: "ollama",
+            model: "llama3.1:8b",
+            quant: "Q4_K_M",
+            ttftMsPerRun: [100, 200, 300],
+            tpsPerRun: [10, 20, 30],
+            tokensPerRun: [8, 8, 8],
+            specHash: "hash-a",
+            hardware: hardware,
+            runAlone: true,
+            loadDurationMsPerRun: [50, nil, 70],
+            prefillTpsPerRun: [100, 200, nil],
+            generateTpsPerRun: [20, 30, 40],
+            coldLoadDurationMs: 3500,
+            coldTtftMs: 3800,
+            coldPrefillTps: 90,
+            coldGenerateTps: 22
+        )
+        XCTAssertEqual(result.medianLoadDurationMs, 60) // median of [50, 70]
+        XCTAssertEqual(result.medianPrefillTps, 150) // median of [100, 200]
+        XCTAssertEqual(result.medianGenerateTps, 30)
+        XCTAssertEqual(result.coldLoadDurationMs, 3500)
+        XCTAssertEqual(result.coldTtftMs, 3800)
+    }
+
+    func testNativeSplitAndColdRoundTripThroughJSON() throws {
+        let result = BenchResult(
+            lane: "ollama",
+            transport: .httpOllama,
+            engine: "ollama",
+            model: "llama3.1:8b",
+            quant: "Q4_K_M",
+            ttftMsPerRun: [100, 200],
+            tpsPerRun: [10, 20],
+            tokensPerRun: [8, 8],
+            specHash: "hash-a",
+            hardware: hardware,
+            runAlone: true,
+            loadDurationMsPerRun: [12.5, 11.0],
+            prefillTpsPerRun: [400, 420],
+            generateTpsPerRun: [22, 23],
+            coldLoadDurationMs: 3000,
+            coldTtftMs: 3200
+        )
+        let data = try JSONEncoder().encode(result)
+        let decoded = try JSONDecoder().decode(BenchResult.self, from: data)
+        XCTAssertEqual(decoded, result)
+        XCTAssertEqual(decoded.schemaVersion, 2)
+    }
+
+    func testLegacyRecordDecodesWithoutNativeFields() throws {
+        let json = """
+        {
+          "lane": "ollama", "transport": "http-ollama", "engine": "ollama",
+          "model": "llama3.1-8b", "quant": "Q4_K_M",
+          "ttftMsPerRun": [166, 170, 164], "tpsPerRun": [22.1, 21.8, 22.4],
+          "tokensPerRun": [128, 128, 128],
+          "specHash": "hash-a",
+          "hardware": {"chip": "Apple M-test", "memoryGB": 32, "os": "macOS 26.0"},
+          "runAlone": true
+        }
+        """
+        let decoded = try JSONDecoder().decode(BenchResult.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.loadDurationMsPerRun, [])
+        XCTAssertNil(decoded.medianLoadDurationMs)
+        XCTAssertNil(decoded.coldTtftMs)
+        XCTAssertEqual(decoded.minTtftMs, 164)
+        XCTAssertEqual(decoded.maxTtftMs, 170)
+    }
+
+    func testPublicationThresholds() {
+        XCTAssertFalse(makeResult(ttftMsPerRun: Array(repeating: 1, count: 5), tpsPerRun: Array(repeating: 1, count: 5)).publishesP90)
+        XCTAssertTrue(makeResult(ttftMsPerRun: Array(repeating: 1, count: 20), tpsPerRun: Array(repeating: 1, count: 20)).publishesP90)
+        XCTAssertFalse(makeResult(ttftMsPerRun: Array(repeating: 1, count: 30), tpsPerRun: Array(repeating: 1, count: 30)).publishesP99)
+        XCTAssertTrue(makeResult(ttftMsPerRun: Array(repeating: 1, count: 100), tpsPerRun: Array(repeating: 1, count: 100)).publishesP99)
     }
 }

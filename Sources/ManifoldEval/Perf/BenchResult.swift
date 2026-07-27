@@ -33,12 +33,15 @@ public struct BenchResult: Codable, Sendable, Equatable {
     /// produced it, instead of guessing from field presence. Records
     /// produced before this field existed decode as version `1` (the
     /// original shape) via ``init(from:)``'s `decodeIfPresent` fallback.
+    ///
+    /// - `1` — TTFT/TPS/tokens + median/p90/p99 + engineVersion/modelDigest
+    /// - `2` — adds native load/prefill/generate split, min/max, cold-start
     public let schemaVersion: Int
 
     /// The current schema version — every ``BenchResult`` this harness
     /// constructs carries this value unless a caller overrides it (tests
     /// only; production code should never need to).
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
 
     /// The spec lane name this result measures, e.g. `"ollama"`, `"omlx"`.
     public let lane: String
@@ -56,14 +59,39 @@ public struct BenchResult: Codable, Sendable, Equatable {
     /// Tokens-per-second, one entry per timed run. `tokens / total_wall_seconds`
     /// — prefill INCLUDED in the denominator, matching the in-process Swift
     /// benches' definition this harness replaces (so historical numbers stay
-    /// comparable; see PR description).
+    /// comparable; see PR description). Pair with ``generateTpsPerRun`` for
+    /// the decode-only split.
     public let tpsPerRun: [Double]
     /// Output token count per timed run (as reported by the server, or a
     /// client-side count when the wire format doesn't report one).
     public let tokensPerRun: [Int]
 
+    /// Per-run model-load duration (ms). Ollama `load_duration`; empty when
+    /// the transport never reported a value (OpenAI-compat). When non-empty,
+    /// same length as the timed-run arrays (missing per-run values are
+    /// omitted only by leaving the whole array empty — partial coverage is
+    /// represented with `nil` slots).
+    public let loadDurationMsPerRun: [Double?]
+    /// Per-run prefill (prompt-processing) tok/s. Ollama native; empty on
+    /// OpenAI-compat.
+    public let prefillTpsPerRun: [Double?]
+    /// Per-run decode/generation tok/s. Ollama native (`eval_*`); derived on
+    /// OpenAI-compat as `tokens / (wall − TTFT)`.
+    public let generateTpsPerRun: [Double?]
+
     public let medianTtftMs: Double
     public let medianTps: Double
+    public let minTtftMs: Double
+    public let maxTtftMs: Double
+    public let minTps: Double
+    public let maxTps: Double
+    /// Median over non-`nil` load-duration samples; `nil` when none reported.
+    public let medianLoadDurationMs: Double?
+    /// Median over non-`nil` prefill-TPS samples; `nil` when none reported.
+    public let medianPrefillTps: Double?
+    /// Median over non-`nil` generate-TPS samples; `nil` when none reported.
+    public let medianGenerateTps: Double?
+
     /// 90th/99th percentile TTFT and TPS across the timed-run samples —
     /// median alone hides tail behavior a publication-grade number needs to
     /// show (a lane with a fast median but a long p99 tail is a materially
@@ -71,17 +99,11 @@ public struct BenchResult: Codable, Sendable, Equatable {
     /// ``percentile(_:_:)`` (nearest-rank: `sorted[ceil(fraction * n) - 1]`,
     /// no interpolation — see that function's doc comment).
     ///
-    /// **Read `percentilesAreDegenerate`/`p90Rank`/`p99Rank` before trusting
-    /// these at small sample sizes.** Nearest-rank makes `p99TtftMs` /
-    /// `p99Tps` literally equal `max(samples)` for every `n < 100`
-    /// (`ceil(0.99 * n) == n` whenever `n <= 99`), and at `n <= 5` it makes
-    /// `p90` equal `p99` equal the max as well (`ceil(0.90 * 5) ==
-    /// ceil(0.99 * 5) == 5`). A report with `timed_runs: 5` — the repo's own
-    /// example fixture — publishes the same slowest-run number under three
-    /// different labels (`p90`, `p99`, and implicitly `max`) unless it reads
-    /// the degeneracy flag and says so. Raising `timed_runs` to 30 makes p90
-    /// genuine (rank 27 of 30) while p99 is still the max; p99 only becomes a
-    /// real percentile (not the max) at `timed_runs >= 100`.
+    /// **Publication policy (issue #2335):** report **median + min/max** at
+    /// `n < 20`; publish **p90 only at `n ≥ 20`**; never treat p99 as a real
+    /// percentile below `n ≥ 100` (nearest-rank makes p99 == max for every
+    /// `n < 100`). Check ``percentilesAreDegenerate`` / ``p90Rank`` /
+    /// ``p99Rank`` before printing p90/p99 as independent numbers.
     public let p90TtftMs: Double
     public let p99TtftMs: Double
     public let p90Tps: Double
@@ -100,6 +122,27 @@ public struct BenchResult: Codable, Sendable, Equatable {
     /// before printing p90/p99 as if they were two independent measurements;
     /// see the doc comment on `p90TtftMs` for the exact thresholds.
     public var percentilesAreDegenerate: Bool { p90Rank == p99Rank }
+
+    /// Sample count at which p90 is published as a real percentile (not just
+    /// a synonym for a near-max sample under nearest-rank).
+    public static let p90PublicationMinimumSamples = 20
+    /// Sample count at which p99 stops being exactly the sample maximum
+    /// under nearest-rank (`ceil(0.99 * n) < n` first holds at n = 100).
+    public static let p99PublicationMinimumSamples = 100
+
+    /// Whether this record's sample count is large enough to publish p90
+    /// under the #2335 policy.
+    public var publishesP90: Bool { ttftMsPerRun.count >= Self.p90PublicationMinimumSamples }
+    /// Whether this record's sample count is large enough to publish p99
+    /// under the #2335 policy.
+    public var publishesP99: Bool { ttftMsPerRun.count >= Self.p99PublicationMinimumSamples }
+
+    /// Cold-start load duration (ms) when ``BenchSpec/GenerationProtocol/measureCold``
+    /// ran an unload + one cold measurement; `nil` otherwise.
+    public let coldLoadDurationMs: Double?
+    public let coldTtftMs: Double?
+    public let coldPrefillTps: Double?
+    public let coldGenerateTps: Double?
 
     /// ``BenchSpec/specHash`` of the spec this result was produced from — the
     /// load-bearing field the collator's hard guard checks before comparing
@@ -141,7 +184,14 @@ public struct BenchResult: Codable, Sendable, Equatable {
         runAlone: Bool,
         schemaVersion: Int = BenchResult.currentSchemaVersion,
         engineVersion: String? = nil,
-        modelDigest: String? = nil
+        modelDigest: String? = nil,
+        loadDurationMsPerRun: [Double?] = [],
+        prefillTpsPerRun: [Double?] = [],
+        generateTpsPerRun: [Double?] = [],
+        coldLoadDurationMs: Double? = nil,
+        coldTtftMs: Double? = nil,
+        coldPrefillTps: Double? = nil,
+        coldGenerateTps: Double? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.lane = lane
@@ -152,8 +202,18 @@ public struct BenchResult: Codable, Sendable, Equatable {
         self.ttftMsPerRun = ttftMsPerRun
         self.tpsPerRun = tpsPerRun
         self.tokensPerRun = tokensPerRun
+        self.loadDurationMsPerRun = loadDurationMsPerRun
+        self.prefillTpsPerRun = prefillTpsPerRun
+        self.generateTpsPerRun = generateTpsPerRun
         self.medianTtftMs = Self.median(ttftMsPerRun)
         self.medianTps = Self.median(tpsPerRun)
+        self.minTtftMs = ttftMsPerRun.min() ?? 0
+        self.maxTtftMs = ttftMsPerRun.max() ?? 0
+        self.minTps = tpsPerRun.min() ?? 0
+        self.maxTps = tpsPerRun.max() ?? 0
+        self.medianLoadDurationMs = Self.medianOfPresent(loadDurationMsPerRun)
+        self.medianPrefillTps = Self.medianOfPresent(prefillTpsPerRun)
+        self.medianGenerateTps = Self.medianOfPresent(generateTpsPerRun)
         self.p90TtftMs = Self.percentile(ttftMsPerRun, 0.90)
         self.p99TtftMs = Self.percentile(ttftMsPerRun, 0.99)
         self.p90Tps = Self.percentile(tpsPerRun, 0.90)
@@ -163,6 +223,10 @@ public struct BenchResult: Codable, Sendable, Equatable {
         // one rank pair describes all four percentile fields above.
         self.p90Rank = Self.rank(for: 0.90, count: ttftMsPerRun.count)
         self.p99Rank = Self.rank(for: 0.99, count: ttftMsPerRun.count)
+        self.coldLoadDurationMs = coldLoadDurationMs
+        self.coldTtftMs = coldTtftMs
+        self.coldPrefillTps = coldPrefillTps
+        self.coldGenerateTps = coldGenerateTps
         self.specHash = specHash
         self.hardware = hardware
         self.runAlone = runAlone
@@ -173,14 +237,18 @@ public struct BenchResult: Codable, Sendable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, lane, transport, engine, model, quant
         case ttftMsPerRun, tpsPerRun, tokensPerRun
-        case medianTtftMs, medianTps, p90TtftMs, p99TtftMs, p90Tps, p99Tps, p90Rank, p99Rank
+        case loadDurationMsPerRun, prefillTpsPerRun, generateTpsPerRun
+        case medianTtftMs, medianTps, minTtftMs, maxTtftMs, minTps, maxTps
+        case medianLoadDurationMs, medianPrefillTps, medianGenerateTps
+        case p90TtftMs, p99TtftMs, p90Tps, p99Tps, p90Rank, p99Rank
+        case coldLoadDurationMs, coldTtftMs, coldPrefillTps, coldGenerateTps
         case specHash, hardware, runAlone, engineVersion, modelDigest
     }
 
     /// Custom `Decodable` conformance so a record written before
-    /// `schemaVersion` existed (or before the percentile/rank fields
-    /// existed) still decodes: `schemaVersion` defaults to `1`, and the
-    /// percentiles/ranks fall back to recomputing from the per-run sample
+    /// `schemaVersion` existed (or before the percentile/rank/native-split
+    /// fields existed) still decodes: `schemaVersion` defaults to `1`, and
+    /// derived fields fall back to recomputing from the per-run sample
     /// arrays rather than failing to decode entirely.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -193,10 +261,27 @@ public struct BenchResult: Codable, Sendable, Equatable {
         ttftMsPerRun = try container.decode([Double].self, forKey: .ttftMsPerRun)
         tpsPerRun = try container.decode([Double].self, forKey: .tpsPerRun)
         tokensPerRun = try container.decode([Int].self, forKey: .tokensPerRun)
+        loadDurationMsPerRun = try container.decodeIfPresent([Double?].self, forKey: .loadDurationMsPerRun) ?? []
+        prefillTpsPerRun = try container.decodeIfPresent([Double?].self, forKey: .prefillTpsPerRun) ?? []
+        generateTpsPerRun = try container.decodeIfPresent([Double?].self, forKey: .generateTpsPerRun) ?? []
         medianTtftMs = try container.decodeIfPresent(Double.self, forKey: .medianTtftMs)
             ?? Self.median(ttftMsPerRun)
         medianTps = try container.decodeIfPresent(Double.self, forKey: .medianTps)
             ?? Self.median(tpsPerRun)
+        minTtftMs = try container.decodeIfPresent(Double.self, forKey: .minTtftMs)
+            ?? (ttftMsPerRun.min() ?? 0)
+        maxTtftMs = try container.decodeIfPresent(Double.self, forKey: .maxTtftMs)
+            ?? (ttftMsPerRun.max() ?? 0)
+        minTps = try container.decodeIfPresent(Double.self, forKey: .minTps)
+            ?? (tpsPerRun.min() ?? 0)
+        maxTps = try container.decodeIfPresent(Double.self, forKey: .maxTps)
+            ?? (tpsPerRun.max() ?? 0)
+        medianLoadDurationMs = try container.decodeIfPresent(Double.self, forKey: .medianLoadDurationMs)
+            ?? Self.medianOfPresent(loadDurationMsPerRun)
+        medianPrefillTps = try container.decodeIfPresent(Double.self, forKey: .medianPrefillTps)
+            ?? Self.medianOfPresent(prefillTpsPerRun)
+        medianGenerateTps = try container.decodeIfPresent(Double.self, forKey: .medianGenerateTps)
+            ?? Self.medianOfPresent(generateTpsPerRun)
         p90TtftMs = try container.decodeIfPresent(Double.self, forKey: .p90TtftMs)
             ?? Self.percentile(ttftMsPerRun, 0.90)
         p99TtftMs = try container.decodeIfPresent(Double.self, forKey: .p99TtftMs)
@@ -209,6 +294,10 @@ public struct BenchResult: Codable, Sendable, Equatable {
             ?? Self.rank(for: 0.90, count: ttftMsPerRun.count)
         p99Rank = try container.decodeIfPresent(Int.self, forKey: .p99Rank)
             ?? Self.rank(for: 0.99, count: ttftMsPerRun.count)
+        coldLoadDurationMs = try container.decodeIfPresent(Double.self, forKey: .coldLoadDurationMs)
+        coldTtftMs = try container.decodeIfPresent(Double.self, forKey: .coldTtftMs)
+        coldPrefillTps = try container.decodeIfPresent(Double.self, forKey: .coldPrefillTps)
+        coldGenerateTps = try container.decodeIfPresent(Double.self, forKey: .coldGenerateTps)
         specHash = try container.decode(String.self, forKey: .specHash)
         hardware = try container.decode(HardwareSnapshot.self, forKey: .hardware)
         runAlone = try container.decode(Bool.self, forKey: .runAlone)
@@ -216,12 +305,13 @@ public struct BenchResult: Codable, Sendable, Equatable {
         modelDigest = try container.decodeIfPresent(String.self, forKey: .modelDigest)
     }
 
-    /// Checks that every per-run sample array on `result` carries exactly
-    /// `expectedTimedRuns` entries (the spec's `protocol.timed_runs`).
-    /// `PerfRunner` calls this on every result it produces before returning
-    /// it — mirrors `P044ProfilingContract.validate(report, for: request)`:
-    /// a completed measurement is checked against the request that shaped
-    /// it, rather than trusted just because it typechecks.
+    /// Checks that every required per-run sample array on `result` carries
+    /// exactly `expectedTimedRuns` entries (the spec's `protocol.timed_runs`).
+    /// Optional native-split arrays, when non-empty, must match the same
+    /// count. `PerfRunner` calls this on every result it produces before
+    /// returning it — mirrors `P044ProfilingContract.validate(report, for:
+    /// request)`: a completed measurement is checked against the request that
+    /// shaped it, rather than trusted just because it typechecks.
     public static func validate(_ result: BenchResult, expectedTimedRuns: Int) throws {
         let fields: [(name: String, count: Int)] = [
             ("ttft_ms_per_run", result.ttftMsPerRun.count),
@@ -229,6 +319,15 @@ public struct BenchResult: Codable, Sendable, Equatable {
             ("tokens_per_run", result.tokensPerRun.count),
         ]
         for field in fields where field.count != expectedTimedRuns {
+            throw BenchResultValidationError.sampleCountMismatch(
+                field: field.name, expected: expectedTimedRuns, actual: field.count)
+        }
+        let optionalFields: [(name: String, count: Int)] = [
+            ("load_duration_ms_per_run", result.loadDurationMsPerRun.count),
+            ("prefill_tps_per_run", result.prefillTpsPerRun.count),
+            ("generate_tps_per_run", result.generateTpsPerRun.count),
+        ]
+        for field in optionalFields where field.count != 0 && field.count != expectedTimedRuns {
             throw BenchResultValidationError.sampleCountMismatch(
                 field: field.name, expected: expectedTimedRuns, actual: field.count)
         }
@@ -242,6 +341,13 @@ public struct BenchResult: Codable, Sendable, Equatable {
             return (sorted[mid - 1] + sorted[mid]) / 2
         }
         return sorted[mid]
+    }
+
+    /// Median of the non-`nil` entries; `nil` when none present.
+    static func medianOfPresent(_ values: [Double?]) -> Double? {
+        let present = values.compactMap { $0 }
+        guard !present.isEmpty else { return nil }
+        return median(present)
     }
 
     /// Nearest-rank percentile: sorts `values` and picks the element at

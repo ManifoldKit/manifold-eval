@@ -151,4 +151,41 @@ final class BenchSpecTests: XCTestCase {
             try JSONDecoder().decode(BenchSpec.self, from: Data(json.utf8))
         )
     }
+
+    func testMeasureColdDefaultsToFalseAndDoesNotAffectSpecHash() throws {
+        let without = try makeSpec()
+        XCTAssertFalse(without.protocolConfig.measureCold)
+
+        let withCold = BenchSpec(
+            modelFamily: without.modelFamily,
+            protocolConfig: try .init(
+                prompt: without.protocolConfig.prompt,
+                temperature: without.protocolConfig.temperature,
+                maxTokens: without.protocolConfig.maxTokens,
+                warmupRuns: without.protocolConfig.warmupRuns,
+                timedRuns: without.protocolConfig.timedRuns,
+                measureCold: true
+            ),
+            lanes: without.lanes
+        )
+        XCTAssertTrue(withCold.protocolConfig.measureCold)
+        // measure_cold is methodology, not workload identity — same hash.
+        XCTAssertEqual(without.specHash, withCold.specHash)
+
+        let json = """
+        {
+          "model_family": "llama-3.1-8b-instruct",
+          "protocol": {
+            "prompt": "2 + 2 =", "temperature": 0.0, "max_tokens": 128,
+            "warmup_runs": 1, "timed_runs": 5, "measure_cold": true
+          },
+          "lanes": [
+            { "name": "ollama", "transport": "http-ollama", "endpoint": "http://localhost:11434",
+              "model": "llama3.1:8b", "quant": "Q4_K_M" }
+          ]
+        }
+        """
+        let decoded = try JSONDecoder().decode(BenchSpec.self, from: Data(json.utf8))
+        XCTAssertTrue(decoded.protocolConfig.measureCold)
+    }
 }
