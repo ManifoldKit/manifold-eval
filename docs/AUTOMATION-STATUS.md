@@ -59,13 +59,28 @@ Evidence at time of writing (`gh run list --workflow=core-bump.yml`):
 So no hand-dispatch is needed. `workflow_dispatch` remains available for catch-up runs. Re-check with
 the command above; if the newest runs are `workflow_dispatch`, the PAT has regressed again.
 
-### Draft-PR skipping — *by design, enforced upstream*
+### Draft PRs — *red on purpose, as of 2026-07-29*
 
-`ci.yml` skips draft PRs (draft = a zero-CI staging area). The guard lives inside the org reusable
-workflow `ManifoldKit/.github/.github/workflows/swift-ci.yml`, not in this repo, so it is not
-checkable here. The caller-side `pull_request: types:` list **must** keep `ready_for_review` — without
-it, a PR opened as draft never fires an event this workflow subscribes to when marked ready, and its
-CI would never run.
+**A draft PR gets a deliberately FAILING `build-test / build-and-test` check.** It is not skipped and
+it is not green. Verified 2026-07-29 on this repo's own PR #63: `conclusion: FAILURE` while
+`isDraft: true`.
+
+This is upstream behavior in `ManifoldKit/.github/.github/workflows/swift-ci.yml`, not something this
+repo controls, and it is deliberate — the workflow's own comment records why the old
+skip-on-draft guard was removed: **a *skipped* required check counts as PASSING for branch
+protection**, so a draft could satisfy the gate without ever building, and stay satisfied after being
+marked ready. manifold-llama#153 merged that way on 2026-07-20 — a `feat!:` breaking change, gate
+never built it. Now the job always runs and fails fast on a draft, so the check can only be green if
+a real build happened.
+
+Cost is still near zero: drafts are routed to `ubuntu-latest` and run only `exit 1`, so no macOS
+minutes burn. The practical effect is unchanged — a draft is still a staging area, `gh pr ready` is
+still the deliberate trigger for the real gate — but expect red, not absent, and don't treat a red
+draft check as a problem to fix.
+
+The caller-side `pull_request: types:` list **must** keep `ready_for_review` — without it, a PR
+opened as draft never fires an event this workflow subscribes to when marked ready, so the real gate
+would never run and the check would stay red forever.
 
 ### Model-bearing sweep cadence — *open, no owner*
 

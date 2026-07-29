@@ -79,11 +79,15 @@ BFCL/MTEB corpora into `~/.cache/manifold-eval` for those local runs.
   not trip release-please; releases here cut only from eval's own `feat:`/
   `fix:` work). Gated on `RELEASE_AUTOMERGE_TOKEN`; if that secret is absent
   it just leaves the PR open.
-- CI (`ci.yml`) skips draft PRs by design (draft = zero-CI staging area).
-  The skip lives in the org reusable workflow, so the caller-side
+- **A draft PR shows a deliberately RED check** — the org reusable workflow
+  runs the job on drafts and fails it fast (on `ubuntu-latest`, so no macOS
+  minutes), because a *skipped* required check counts as PASSING and once let
+  an unbuilt breaking change merge. Red on a draft is expected, not a problem
+  to fix; `gh pr ready` triggers the real gate. The caller-side
   `pull_request: types:` list must keep `ready_for_review` — without it a PR
   opened as draft never fires an event this workflow subscribes to when
-  marked ready, and CI would never run.
+  marked ready, so the real gate would never run. Details:
+  `docs/AUTOMATION-STATUS.md`.
 - A dirty stray worktree, `~/Repos/manifold-eval-overnight` (modified
   `Package.swift`/`Package.resolved`, untracked `.overnight-runs/`), exists
   outside the normal worktree container — do not touch it; it is tracked
