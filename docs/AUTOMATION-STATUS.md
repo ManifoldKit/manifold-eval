@@ -58,39 +58,45 @@ Evidence at time of writing (`gh run list --workflow=core-bump.yml`):
 So no hand-dispatch is needed. `workflow_dispatch` remains available for catch-up runs. Re-check with
 the command above; if the newest runs are `workflow_dispatch`, the PAT has regressed again.
 
-### Release-PR checks — *unresolved as of 2026-07-29*
+### Release-PR checks — *resolved 2026-07-29, and it took both halves*
 
-**Release-please PRs report no checks at all, and it is not yet proven why.** Releases 0.1.1, 0.1.2
-and 0.1.3 each merged with an empty `statusCheckRollup` (admin bypass; `enforce_admins` is `false`),
-and **0.1.4 (#54) is open and `BLOCKED` right now**. The four most recent releases in each of
-manifold-mlx and manifold-llama look the same.
+**Release PRs now run CI and merge through the gate.** 0.1.4 (#54) was the first: required check
+`build-test / build-and-test` reported `SUCCESS`, `mergeStateStatus` went `CLEAN`, and it merged with
+no admin bypass. 0.1.1/0.1.2/0.1.3 had each merged with an empty `statusCheckRollup`.
 
-One cause is certain: `ci.yml` used to path-ignore exactly the two files a release PR touches, and a
-path-skipped workflow never reports a required check. That filter is now removed from `pull_request`.
+There were **two** blockers stacked, which is why the first fix alone looked inert:
 
-What is **not** established is whether that was the *only* blocker:
+1. **The path filter** (`ci.yml` path-ignored exactly the two files a release PR touches). A
+   path-skipped workflow never reports a required check, so no run existed at all —
+   `actions/runs?branch=release-please--branches--main` returned `total_count: 0`. Removed from
+   `pull_request` in #63.
+2. **The approval gate.** With the filter gone a run *is* created, but it lands `action_required`
+   (held pending approval) because release-please posts as `app/github-actions`. Held runs produce no
+   check runs, so the PR still reads as having none.
+
+Fixing only (1) moves the symptom from "no run" to "run held" — identical from the PR's point of
+view. That is what ManifoldKit core shows: its release PRs are not path-excluded, yet still report
+zero checks because their runs sit `action_required`.
+
+**The release flow, until the approval gate is removed:**
 
 ```sh
-gh api "repos/ManifoldKit/manifold-eval/actions/runs?branch=release-please--branches--main"
-#   → total_count: 0
+# 1. find the held run for the release PR's head
+gh run list --branch release-please--branches--main --limit 3 \
+   --json databaseId,headSha,status,conclusion
+# 2. approve it — a normal maintainer action, NOT a branch-protection bypass
+gh api -X POST repos/ManifoldKit/manifold-eval/actions/runs/<id>/approve
+# 3. wait for green, then merge normally
+gh pr merge <n> --squash
 ```
 
-Zero runs fits two explanations equally — the filter excluded them, *or* no workflow run is created
-for these PRs at all (release-please posts as `app/github-actions` using the default `GITHUB_TOKEN`,
-and `companion-release-please.yml` passes no `token:`). ManifoldKit core is evidence for the second,
-and the case is exact rather than general: core's most recent release PR, **#2414**, happens to touch
-`Sources/ManifoldMCP/ManifoldMCP.docc/Articles/MCPGettingStarted.md`, which matches core's `paths:`
-allow-list — so it is *not* path-excluded. It still reports zero checks: its runs on that head all sit
-`action_required`. (A changelog-only diff would miss core's allow-list too, which is why the specific
-PR matters — pick a currently-passing one if re-checking.)
+Removing step 2 entirely would need release-please to post under an App/PAT identity rather than the
+default `GITHUB_TOKEN` — that lives in `ManifoldKit/.github`'s `companion-release-please.yml`, is
+shared with manifold-mlx and manifold-llama, and touches agent identity, so it is not a per-repo fix.
 
-**How to settle it:** on the next release PR, re-run the command above. Runs present and green ⇒ the
-path filter was the whole story. Still empty, or `action_required` ⇒ the remedy is a token that
-triggers workflows for release-please (an App or PAT), not a path change. Core's
-`ci-required-test-shim.yml` is the estate's other pattern for this, but it is itself
-`pull_request`-triggered, so it cannot help if no run is created.
-
-Until then, expect release PRs to still need a manual merge.
+**manifold-mlx and manifold-llama deliberately still carry the path filter** — their `ci.yml` records
+why (release Highlights are hand-edited, so a manual merge is already the flow). That divergence is
+intentional, not drift.
 
 ### Draft PRs — *red on purpose, as of 2026-07-29*
 
