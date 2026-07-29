@@ -249,11 +249,12 @@ final class AutomationClaimsTests: XCTestCase {
         var body: [String] = []
         for line in lines[(start + 1)...] {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            // Blank or comment: carry it and keep going — never a block boundary.
-            if trimmed.isEmpty || trimmed.hasPrefix("#") {
-                body.append(String(line))
-                continue
-            }
+            // Blank or comment: skip entirely — neither a block boundary nor
+            // content. Treating them as boundaries was the original hole (a
+            // column-0 comment truncated the block); *including* them would swap
+            // it for a false alarm, since a comment merely mentioning
+            // `paths-ignore` would trip the caller's substring check.
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
             // A real key at this trigger's own indentation (or shallower) is the
             // next sibling, so the block ends here.
             let indent = line.prefix(while: { $0 == " " }).count
