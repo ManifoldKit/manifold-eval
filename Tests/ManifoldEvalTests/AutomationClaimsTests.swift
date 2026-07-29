@@ -196,6 +196,78 @@ final class AutomationClaimsTests: XCTestCase {
         }
     }
 
+    /// `pull_request` must never carry a path filter.
+    ///
+    /// `build-test / build-and-test` is a **required** check on main. A workflow
+    /// skipped by path filtering does not report a required check as passing — it
+    /// never reports at all, so the check stays pending and the PR is blocked
+    /// permanently. (A job skipped by an `if:` expression *does* satisfy a
+    /// required check, but that escape hatch is unavailable here: the context
+    /// comes from a reusable workflow, so skipping the caller job means the
+    /// nested `build-and-test` never exists and the context is never produced.)
+    ///
+    /// Not hypothetical: release-please PRs touch exactly the filtered files, so
+    /// 0.1.1, 0.1.2 and 0.1.3 all merged with zero checks via admin bypass, and
+    /// 0.1.4 (#54) is open and BLOCKED. Filtering on `push` is fine and stays; a
+    /// changelog/manifest-only merge cannot break the build.
+    ///
+    /// This guard asserts the filter is absent — it does NOT assert that CI
+    /// actually runs on release PRs, which depends on run creation for a
+    /// bot-authored PR and is unverified. See `docs/AUTOMATION-STATUS.md`.
+    func testPullRequestTriggerHasNoPathFilter() throws {
+        let yaml = try read(".github/workflows/ci.yml")
+        guard let block = triggerBlock("pull_request", in: yaml) else {
+            XCTFail("ci.yml has no `pull_request:` trigger block to inspect")
+            return
+        }
+        XCTAssertFalse(
+            block.contains("paths-ignore") || block.contains("paths:"),
+            """
+            ci.yml's `pull_request:` trigger has a path filter. That makes any PR touching only \
+            filtered files — every release-please PR — permanently BLOCKED, because a workflow \
+            skipped by path filtering never reports the required `build-test / build-and-test` \
+            check. Filter on `push` instead, where nothing depends on the check reporting.
+              pull_request block:
+            \(block)
+            """
+        )
+    }
+
+    /// The body of one top-level trigger inside a workflow's `on:` block: every
+    /// line from `  <name>:` up to the next sibling key.
+    ///
+    /// Comments and blank lines are *skipped, not terminators*. An earlier
+    /// version broke at the first line lacking a three-space indent, which meant
+    /// a column-0 comment — the house style everywhere else in `ci.yml` — silently
+    /// truncated the block and let a live `paths-ignore` below it go unseen. Three
+    /// shapes passed green with the filter active (column-0 comment, two-space
+    /// comment, whitespace-only line). Re-adding the filter in the file's own
+    /// style would have defeated the guard entirely.
+    private func triggerBlock(_ name: String, in yaml: String) -> String? {
+        let lines = yaml.split(separator: "\n", omittingEmptySubsequences: false)
+        guard let start = lines.firstIndex(of: Substring("  \(name):")) else { return nil }
+        var body: [String] = []
+        for line in lines[(start + 1)...] {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            // Blank or comment: skip entirely — neither a block boundary nor
+            // content. Treating them as boundaries was the original hole (a
+            // column-0 comment truncated the block); *including* them would swap
+            // it for a false alarm, since a comment merely mentioning
+            // `paths-ignore` would trip the caller's substring check.
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            // Known limit: a TAB-indented child reads as indent 0 and ends the
+            // block early. Not worth handling — YAML forbids tab indentation, so
+            // such a file is an invalid workflow that never runs, the required
+            // check never reports, and the PR blocks. Fail-loud one layer down.
+            // A real key at this trigger's own indentation (or shallower) is the
+            // next sibling, so the block ends here.
+            let indent = line.prefix(while: { $0 == " " }).count
+            if indent <= 2 { break }
+            body.append(String(line))
+        }
+        return body.joined(separator: "\n")
+    }
+
     // MARK: - The single-source-of-truth convention
 
     /// The docs that used to carry their own status prose must now link here.

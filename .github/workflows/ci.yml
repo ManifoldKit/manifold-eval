@@ -8,9 +8,40 @@ name: ci
 # an event this workflow subscribes to when marked ready, so its CI job would
 # never actually run. See ManifoldKit/.github WORKFLOWS.md.
 #
-# paths-ignore on CHANGELOG.md / .release-please-manifest.json skips this
-# heavy gate on release-please's own PRs and merges (mirrors manifold-mlx /
-# manifold-llama) — those commits touch only version/changelog bookkeeping.
+# paths-ignore is deliberately asymmetric: `push` only, NOT `pull_request`.
+#
+# `build-test / build-and-test` is a REQUIRED status check on main. A workflow
+# skipped by path filtering does not report that check as passing — it never
+# reports at all, so the check sits pending and the PR is permanently BLOCKED.
+# (Contrast a job skipped by an `if:` expression, which *does* satisfy a required
+# check. That escape hatch is unavailable here: this job's context comes from a
+# reusable workflow, so skipping the caller job means the nested `build-and-test`
+# never exists and the context is never produced.)
+#
+# Release-please PRs touch exactly those two files, so this filter excluded every
+# one of them: releases 0.1.1, 0.1.2 and 0.1.3 all merged with zero checks (admin
+# bypass), and 0.1.4 (#54) is open and BLOCKED right now. The four most recent
+# releases in each of manifold-mlx and manifold-llama show the same empty rollup.
+#
+# NOTE — necessary, possibly not sufficient. Removing this filter is required for
+# the check to report, but it may not be the only blocker: `actions/runs` for this
+# repo's release branch shows ZERO runs, which fits both "the filter excluded them"
+# and "no workflow run is created for these PRs at all" (release-please posts as
+# `app/github-actions` with the default GITHUB_TOKEN). ManifoldKit core, whose
+# release PRs are NOT path-excluded, still reports no checks — its runs sit
+# `action_required`. So a second gate may exist. Verify on the next release PR:
+#   gh api "repos/ManifoldKit/manifold-eval/actions/runs?branch=release-please--branches--main"
+# If that is still empty, the remedy is a token that triggers workflows for
+# release-please, not a path change. Core's `ci-required-test-shim.yml` is the
+# estate's other pattern, but it is itself `pull_request`-triggered and so cannot
+# help if no run is created.
+#
+# So: PRs always run the gate (~2-4 min on macos-15, and it is what unblocks the
+# merge), while pushes to main still skip it for changelog/manifest-only commits —
+# the original saving, kept where it costs nothing. A release merge touches only
+# version bookkeeping and cannot break the build.
+#
+# Guarded by AutomationClaimsTests.testPullRequestTriggerHasNoPathFilter.
 on:
   push:
     branches: [main]
@@ -19,9 +50,6 @@ on:
       - '.release-please-manifest.json'
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    paths-ignore:
-      - 'CHANGELOG.md'
-      - '.release-please-manifest.json'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
