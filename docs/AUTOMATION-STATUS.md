@@ -22,8 +22,15 @@ table and `swift test` goes red.
 | Core pin bump | `core-bump.yml` | `repository_dispatch`, `workflow_dispatch` | every ManifoldKit release |
 | Release | `release-please.yml` | `push` (main), `workflow_dispatch` | every merge to main |
 
-Two further guarded facts:
+Three further guarded facts:
 
+- **CI runs on every PR, including release PRs.** `ci.yml` path-ignores `CHANGELOG.md` /
+  `.release-please-manifest.json` on **`push` only, never on `pull_request`**. That asymmetry is
+  load-bearing: `build-test / build-and-test` is a *required* check on main, and a workflow skipped
+  by path filtering never reports it — the check sits pending and the PR is blocked forever. Filtering
+  release PRs made every one of them mergeable only by admin bypass (releases 0.1.1–0.1.4 here all
+  merged with zero checks, as did every release in manifold-mlx and manifold-llama). **Do not re-add
+  a `paths-ignore` under `pull_request`** — a test fails if you do.
 - **Core-bump commits `chore:`** — deliberately release-inert, so a pin bump does not open a patch
   release PR. Releases here cut only from this repo's own `feat:` / `fix:` work.
 - **The rot-guard is Tier-1 only** — `swift build --build-tests` + `swift test`, no models, no

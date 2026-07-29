@@ -196,6 +196,55 @@ final class AutomationClaimsTests: XCTestCase {
         }
     }
 
+    /// `pull_request` must never carry a path filter.
+    ///
+    /// `build-test / build-and-test` is a **required** check on main. A workflow
+    /// skipped by path filtering does not report a required check as passing — it
+    /// never reports at all, so the check stays pending and the PR is blocked
+    /// permanently. (A job skipped by an `if:` expression *does* satisfy a
+    /// required check, but that escape hatch is unavailable here: the context
+    /// comes from a reusable workflow, so skipping the caller job means the
+    /// nested `build-and-test` never exists and the context is never produced.)
+    ///
+    /// Not hypothetical: path-ignoring release-please's PRs made every release PR
+    /// unmergeable except by admin bypass — releases 0.1.1 through 0.1.4 all
+    /// merged with zero checks, as did every release in manifold-mlx and
+    /// manifold-llama. Filtering on `push` is fine and still in place; a
+    /// changelog/manifest-only merge cannot break the build.
+    func testPullRequestTriggerHasNoPathFilter() throws {
+        let yaml = try read(".github/workflows/ci.yml")
+        guard let block = triggerBlock("pull_request", in: yaml) else {
+            XCTFail("ci.yml has no `pull_request:` trigger block to inspect")
+            return
+        }
+        XCTAssertFalse(
+            block.contains("paths-ignore") || block.contains("paths:"),
+            """
+            ci.yml's `pull_request:` trigger has a path filter. That makes any PR touching only \
+            filtered files — every release-please PR — permanently BLOCKED, because a workflow \
+            skipped by path filtering never reports the required `build-test / build-and-test` \
+            check. Filter on `push` instead, where nothing depends on the check reporting.
+              pull_request block:
+            \(block)
+            """
+        )
+    }
+
+    /// The body of one top-level trigger inside a workflow's `on:` block: every
+    /// line from `  <name>:` up to the next key at that same indentation.
+    private func triggerBlock(_ name: String, in yaml: String) -> String? {
+        let lines = yaml.split(separator: "\n", omittingEmptySubsequences: false)
+        guard let start = lines.firstIndex(of: Substring("  \(name):")) else { return nil }
+        var body: [String] = []
+        for line in lines[(start + 1)...] {
+            // Anything indented deeper than two spaces belongs to this trigger;
+            // the first line that isn't ends the block.
+            if !line.isEmpty && !line.hasPrefix("   ") { break }
+            body.append(String(line))
+        }
+        return body.joined(separator: "\n")
+    }
+
     // MARK: - The single-source-of-truth convention
 
     /// The docs that used to carry their own status prose must now link here.
