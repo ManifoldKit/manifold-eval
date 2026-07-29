@@ -80,8 +80,10 @@ BFCL/MTEB corpora into `~/.cache/manifold-eval` for those local runs.
   `fix:` work). Gated on `RELEASE_AUTOMERGE_TOKEN`; if that secret is absent
   it just leaves the PR open.
 - **A draft PR shows a deliberately RED check** — expected, not a problem to
-  fix; `gh pr ready` triggers the real gate. Why, and the current state of
-  release-PR checks: `docs/AUTOMATION-STATUS.md`.
+  fix, and **upstream behavior in the org reusable workflow, not ours to
+  change locally**; don't try to "fix" it by editing `ci.yml`. `gh pr ready`
+  triggers the real gate. Why, and the current state of release-PR checks:
+  `docs/AUTOMATION-STATUS.md`.
 - Keep `ready_for_review` in `ci.yml`'s `pull_request: types:` list — without
   it a PR opened as draft never fires an event this workflow subscribes to
   when marked ready, so the real gate would never run.

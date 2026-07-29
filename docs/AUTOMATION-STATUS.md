@@ -17,7 +17,7 @@ table and `swift test` goes red.
 
 | Automation | File | Triggers | Cadence |
 |---|---|---|---|
-| CI | `ci.yml` | `push` (main), `pull_request` | every push to main / ready-for-review PR |
+| CI | `ci.yml` | `push` (main), `pull_request` | every push to main; **every** PR, drafts included (a draft gets a deliberate red — see below) |
 | Rot-guard | `rot-guard.yml` | `schedule` `0 8 * * 1`, `workflow_dispatch` | weekly, Mondays 08:00 UTC |
 | Core pin bump | `core-bump.yml` | `repository_dispatch`, `workflow_dispatch` | every ManifoldKit release |
 | Release | `release-please.yml` | `push` (main), `workflow_dispatch` | every merge to main |
@@ -77,9 +77,12 @@ gh api "repos/ManifoldKit/manifold-eval/actions/runs?branch=release-please--bran
 
 Zero runs fits two explanations equally — the filter excluded them, *or* no workflow run is created
 for these PRs at all (release-please posts as `app/github-actions` using the default `GITHUB_TOKEN`,
-and `companion-release-please.yml` passes no `token:`). ManifoldKit core is evidence for the second:
-its release PRs are **not** path-excluded, yet still report zero checks, with runs sitting
-`action_required`.
+and `companion-release-please.yml` passes no `token:`). ManifoldKit core is evidence for the second,
+and the case is exact rather than general: core's most recent release PR, **#2414**, happens to touch
+`Sources/ManifoldMCP/ManifoldMCP.docc/Articles/MCPGettingStarted.md`, which matches core's `paths:`
+allow-list — so it is *not* path-excluded. It still reports zero checks: its runs on that head all sit
+`action_required`. (A changelog-only diff would miss core's allow-list too, which is why the specific
+PR matters — pick a currently-passing one if re-checking.)
 
 **How to settle it:** on the next release PR, re-run the command above. Runs present and green ⇒ the
 path filter was the whole story. Still empty, or `action_required` ⇒ the remedy is a token that

@@ -255,6 +255,10 @@ final class AutomationClaimsTests: XCTestCase {
             // it for a false alarm, since a comment merely mentioning
             // `paths-ignore` would trip the caller's substring check.
             if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            // Known limit: a TAB-indented child reads as indent 0 and ends the
+            // block early. Not worth handling — YAML forbids tab indentation, so
+            // such a file is an invalid workflow that never runs, the required
+            // check never reports, and the PR blocks. Fail-loud one layer down.
             // A real key at this trigger's own indentation (or shallower) is the
             // next sibling, so the block ends here.
             let indent = line.prefix(while: { $0 == " " }).count
