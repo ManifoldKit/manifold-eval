@@ -132,12 +132,17 @@ final class AutomationClaimsTests: XCTestCase {
     func testStatusDocStatesCoreBumpsActualCommitType() throws {
         let type = try coreBumpCommitType()
         XCTAssertFalse(type.isEmpty)
+        // Anchored to the exact sentence, not a bare "`\(type):`" substring: the
+        // doc legitimately mentions `feat:` / `fix:` elsewhere (describing what
+        // *does* cut a release), so a loose `contains` passed vacuously when this
+        // mutation was tried — the assertion was green for a workflow committing
+        // `fix:`. Mutation-tested; keep it anchored.
         XCTAssertTrue(
-            try statusDoc().contains("`\(type):`"),
+            try statusDoc().contains("Core-bump commits `\(type):`"),
             """
-            core-bump.yml commits "\(type):" but docs/AUTOMATION-STATUS.md does not state \
-            `\(type):`. This exact claim was wrong in AGENTS.md for weeks (it said `fix:` after \
-            the workflow moved to `chore:`), which is why it is guarded.
+            core-bump.yml commits "\(type):" but docs/AUTOMATION-STATUS.md does not say \
+            "Core-bump commits `\(type):`". This exact claim was wrong in AGENTS.md for weeks \
+            (it said `fix:` after the workflow had moved to `chore:`), which is why it is guarded.
             """
         )
     }
