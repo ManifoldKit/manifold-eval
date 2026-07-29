@@ -104,7 +104,7 @@ Lanes drive **local models on Apple Silicon** (real GGUFs / Ollama) — opt-in, 
 
 - **Sensor with no scheduler = the fuzz-cadence collapse** (per-PR → nightly → weekly → hand-run →
   silence). The weekly CI rot-guard defends the *Tier-1* half of this; the model-bearing half has no
-  scheduler yet (see [Status caveat](#status-caveat-as-of-2026-07)) and is therefore the half that
+  scheduler yet (see [AUTOMATION-STATUS.md](AUTOMATION-STATUS.md)) and is therefore the half that
   can still collapse.
 - **Divergence ≠ backlog.** The biggest waste is dispatching an implementer at a `promptDivergence` /
   `samplerNondeterminism` / `notMeasured` cell — noise dressed as work.
