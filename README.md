@@ -15,6 +15,100 @@ must not be shipped by the team it grades.
 > anchors the design: **surface divergence to focus human attention; never claim to adjudicate it
 > automatically.** The full decision history is in [docs/ORIGINS.md](docs/ORIGINS.md).
 
+---
+
+## How the suite fits together
+
+The ten subcommands are not ten independent tools. They are **four families**, and the relationships
+between them are where the design lives.
+
+### 1. Capture → score (the corpus lanes)
+
+Three corpora — BFCL (tool calls), IFEval (instruction following), and the tool-loop scaffold
+(multi-turn threading) — each split into a **live generator** and an **offline scorer**:
+
+```
+   ┌─ live, opt-in, needs a model ───────┐        ┌─ hermetic, CI-safe, no model ──┐
+   │                                     │        │                                │
+   │   bfcl-generate      ──┐            │        │  ──▶  bfcl                     │
+   │   ifeval-generate    ──┼─▶ responses.jsonl ──┼──▶  ifeval        ──▶ report.md │
+   │   toolloop-generate  ──┘            │        │  ──▶  toolloop                 │
+   └─────────────────────────────────────┘        └────────────────────────────────┘
+              drives the model                         judges what was captured
+```
+
+The split is the point. **Generation is expensive, nondeterministic-ish, and hardware-gated; scoring
+is cheap, deterministic, and reproducible by anyone.** Separating them means a captured run can be
+re-scored forever — after a scorer bug fix, against a new rubric, by someone with no Apple Silicon —
+without re-driving a single token.
+
+Each pair shares one corpus loader and one on-disk schema, so a generate → score round-trip needs no
+adapter or reshape step. That is not a convenience: a hand-rolled full-corpus run once reported a
+misleading **8.0%** by scoring a 25-case bundled-slice generation against the full 199-case corpus.
+The honest number was **64%**. Shared loaders make that class of mistake unrepresentable.
+
+### 2. Differential (the lanes that hold one variable)
+
+Two commands answer "did something change?" by holding everything constant except one variable:
+
+| Command | Holds constant | Varies | Question |
+|---|---|---|---|
+| `diff` | the rendered prompt **bytes** | the backend | Do Ollama and llama.cpp agree on identical input? |
+| `regress` | backend, prompt, sampler | the **quant** | Did re-quantizing this model break it? |
+
+Both exist because a naive comparison is confounded — quant *and* checkpoint *and* renderer all
+differ at once, so a raw cross-backend delta means nothing. See
+[the same-bytes control](docs/CONCEPTS.md#divergence--bug-without-a-same-bytes-control).
+
+### 3. The fold
+
+`collate` is the aggregator. The backends can't be linked into one process (`llama_backend_init` is
+once-per-process; MLX needs serialized in-process Metal), so each runs **separately** and emits
+`ConformanceRecord` JSON. `collate` folds those into one cross-runtime matrix — refusing to merge
+records from different core binaries.
+
+### 4. Performance
+
+`perf-bench` is its own axis: not *is it correct* but *is it fast*, measured comparably across
+serving lanes via one HTTP driver and one pinned spec.
+
+### Which lane answers which question?
+
+| Your question | Run | Live models? |
+|---|---|:---:|
+| Does this model call the right tools, with the right arguments? | `bfcl-generate` → `bfcl` | capture only |
+| …and does the tool *result* thread into the next turn? | `toolloop-generate` → `toolloop` | capture only |
+| Does it follow explicit formatting instructions? | `ifeval-generate` → `ifeval` | capture only |
+| Is this embedding model coherent? | `mteb` | yes |
+| Do two backends agree on the *identical* prompt bytes? | `diff` | yes |
+| Did re-quantizing break correctness? | `regress` | yes |
+| How do all measured cells compare, in one view? | `collate` | no |
+| Which serving lane is faster, measured comparably? | `perf-bench` | yes |
+
+### What to do with the output
+
+Nothing here fixes anything or declares a bug. These commands are a **sensor**; a human triage gate
+is the adjudicator. The full cycle — sensor → triage → fix pipeline → core pin bump → re-measure —
+is documented in **[docs/EVAL-IMPROVEMENT-LOOP.md](docs/EVAL-IMPROVEMENT-LOOP.md)**. Read that
+before acting on any report this repo emits.
+
+### The exit-code grammar
+
+Exit codes are verdict-shaped and mean the same thing across commands, so a script can branch
+without knowing which lane it ran:
+
+| Code | Meaning | What a human does |
+|:---:|---|---|
+| `0` | Clean — nothing actionable | Nothing |
+| `1` | A human should look | Read the raw transcript, then triage |
+| `3` | Indeterminate — a control failed, or nothing was measured | Rerun; **never** treat as a regression |
+| `4` | A known benign artifact (`diff` only) | Glance, then usually move on |
+
+`1` never means "this is a bug." It means "this cell earned a human's attention." Per-command
+sections below note only where a command specializes this grammar.
+
+---
+
 ## Quick start
 
 ```sh
@@ -30,6 +124,9 @@ swift run manifold-eval
 
 Real, hardware-gated eval lanes (Ollama / llama.cpp on Apple Silicon) are **opt-in** and never run
 in hosted CI — see [Running real eval lanes](#running-real-eval-lanes).
+
+New to the repo? [docs/CONCEPTS.md](docs/CONCEPTS.md) defines the vocabulary the rest of this file
+assumes — the cell, the same-bytes control, absence ≠ failure, determinism pinning.
 
 ## Commands
 
@@ -49,23 +146,29 @@ in hosted CI — see [Running real eval lanes](#running-real-eval-lanes).
 
 Each command writes a deterministic Markdown report to stdout, or to a file with `--out`.
 **Diagnostics and progress always go to stderr**, so `--out` (or a stdout redirect) captures a clean
-report. Exit codes are verdict-shaped so CI and scripts can branch on them (see each command).
+report.
+
+---
 
 ### `collate`
 
 Folds the per-leg `[ConformanceRecord]` JSON arrays — each emitted by `manifold-tools score
 --emit-records` in its own backend repo/process — into one corpus and renders the cross-runtime
-matrix. Its **comparability guard** is what `cat *.json | matrix` never had: records are only
-comparable across the *same* ManifoldKit core binary, so a mixed-`coreCommit` set or tooling drift
-is surfaced as a diagnostic rather than silently merged.
+matrix.
+
+**Why it exists.** Its **comparability guard** is what `cat *.json | matrix` never had: records are
+only comparable across the *same* ManifoldKit core binary, so a mixed-`coreCommit` set or tooling
+drift is surfaced as a diagnostic rather than silently merged.
 
 ```sh
 swift run manifold-eval collate ollama.json llama.json mlx.json \
     --out XRUNTIME_MATRIX.md --title "Mistral-v0.3 cross-runtime"
 ```
 
-Exit code: `0` normally (mixed-commit / tooling-drift warnings are advisory and still render);
+**Exit codes.** `0` normally — mixed-commit / tooling-drift warnings are advisory and still render;
 `1` only on an error-severity diagnostic (e.g. an empty corpus).
+
+---
 
 ### `ifeval` / `bfcl` (offline scorers)
 
@@ -85,12 +188,16 @@ swift run manifold-eval bfcl --corpus path/to/bfcl/data --responses calls.jsonl 
 swift run manifold-eval bfcl --gorilla-cache-dir ~/.cache/manifold-eval/bfcl --responses calls.jsonl --out BFCL.md
 ```
 
-`--corpus <dir>` expects the flat `<category>_questions.jsonl` / `<category>_answers.jsonl` layout
-(fixtures, or a hand-reshaped corpus). `--gorilla-cache-dir <dir>` is the alternative for a Gorilla v4
-cache directory as `bfcl-generate --cache-dir` (or `scripts/fetch-corpora.sh`) produces it — pass
-exactly one of the two. Cases missing from the responses file are scored as empty (for BFCL, the
-`irrelevance` category passes on an empty call list; every other category counts as a miss). With
+**Two corpus layouts, pick exactly one.** `--corpus <dir>` expects the flat
+`<category>_questions.jsonl` / `<category>_answers.jsonl` layout (fixtures, or a hand-reshaped
+corpus). `--gorilla-cache-dir <dir>` is the alternative for a Gorilla v4 cache directory as
+`bfcl-generate --cache-dir` (or `scripts/fetch-corpora.sh`) produces it.
+
+**Missing cases.** Cases absent from the responses file are scored as empty. For BFCL, the
+`irrelevance` category *passes* on an empty call list; every other category counts as a miss. With
 `--out`, a one-line accuracy summary also prints to stdout.
+
+---
 
 ### `bfcl-generate`
 
@@ -114,19 +221,25 @@ swift run manifold-eval bfcl --gorilla-cache-dir ~/.cache/manifold-eval/bfcl \
     --responses multiple-responses.jsonl --out BFCL.md
 ```
 
-Both commands load cases through the same `BFCLLane` corpus loader, so ids and corpus layout always
-match — no manual reshape, and no risk of scoring against a different id-namespace than what was
-generated (a hand-rolled full-corpus run once reported a misleading 8.0% by scoring a 25-case
-bundled-slice generation against the full 199-case `multiple` corpus; the honest slice number was
-64%). This is a capture-only pass — the tool registry is empty, so the model's first tool call is
-recorded, never dispatched/executed. Progress streams to stderr per-case, and each response is
-written to `--out` as soon as it's generated, so a multi-hour full-corpus run banks progress
-incrementally instead of risking it all on one process that runs to completion.
+**Why one shared loader.** Both commands load cases through the same `BFCLLane` corpus loader, so
+ids and corpus layout always match — no manual reshape, and no risk of scoring against a different
+id-namespace than what was generated. This is not hypothetical: a hand-rolled full-corpus run once
+reported a misleading **8.0%** by scoring a 25-case bundled-slice generation against the full
+199-case `multiple` corpus. The honest slice number was **64%**.
 
-Scoring a `bfcl-generate --category multiple` run reports the `multiple` row honestly (every case in
-that category was attempted), but categories you didn't generate still show up at their (correct)
-0% — read the per-category table, not just the misleading "Overall" aggregate, when your responses
-file doesn't cover every category.
+**Capture, never dispatch.** The tool registry is empty, so the model's first tool call is recorded,
+never executed.
+
+**Incremental.** Progress streams to stderr per-case, and each response is written to `--out` as
+soon as it's generated, so a multi-hour full-corpus run banks progress incrementally instead of
+risking it all on one process that runs to completion.
+
+**Gotcha — read the per-category table, not the Overall aggregate.** Scoring a `bfcl-generate
+--category multiple` run reports the `multiple` row honestly (every case in that category was
+attempted), but categories you didn't generate still show up at their correct 0%. When your
+responses file doesn't cover every category, the "Overall" number is misleading by construction.
+
+---
 
 ### `ifeval-generate`
 
@@ -148,24 +261,29 @@ swift run manifold-eval ifeval-generate --ollama-model qwen2.5-0.5b \
 swift run manifold-eval ifeval --corpus ifeval.jsonl --responses responses.jsonl --out IFEVAL.md
 ```
 
-IFEval cases are independent single-turn text generations with no shared state between cases, so this
-fans out up to `--concurrency` cases at once, each against its own `InferenceService`/`OllamaBackend`
-pair — a single shared service's generation queue is FIFO, so sharing one across workers would
-silently serialize them and defeat `--concurrency`. Greedy/deterministic (`temperature: 0`), no tools.
+**Why this one is concurrent** (and `bfcl-generate` isn't). IFEval cases are independent single-turn
+text generations with no shared state, so this fans out up to `--concurrency` cases at once, each
+against its **own** `InferenceService`/`OllamaBackend` pair — a single shared service's generation
+queue is FIFO, so sharing one across workers would silently serialize them and defeat
+`--concurrency`. Greedy/deterministic (`temperature: 0`), no tools.
 
-**Resumable**: if `--out` already exists, keys already present are read and skipped, and new entries
-are appended (not overwritten) — a crash or Ctrl-C partway through a multi-hour full-corpus run loses
-nothing already generated, because each *successful* case is written to disk (through a single actor
-that serializes concurrent workers' writes) as soon as it finishes, not batched at the end. A case
-that errors or times out is deliberately **not** written to `--out` — writing an empty placeholder
-would make that key permanently "present" and never eligible for retry; leaving it absent instead
-means the next invocation retries it automatically (and `ifeval`'s scorer already treats a missing
-key as "score against empty string", so a still-failing case scores identically either way).
+**Resumable.** If `--out` already exists, keys already present are read and skipped, and new entries
+are appended (not overwritten) — a crash or Ctrl-C partway through a multi-hour full-corpus run
+loses nothing already generated, because each *successful* case is written to disk (through a single
+actor that serializes concurrent workers' writes) as soon as it finishes, not batched at the end.
+
+A case that errors or times out is deliberately **not** written to `--out`. Writing an empty
+placeholder would make that key permanently "present" and never eligible for retry; leaving it
+absent instead means the next invocation retries it automatically — and `ifeval`'s scorer already
+treats a missing key as "score against empty string," so a still-failing case scores identically
+either way.
+
+---
 
 ### `mteb`
 
-Runs the MTEB STS-Benchmark lane: embeds sentence pairs through an Ollama embedding model and reports
-Spearman / Pearson correlation against the gold scores.
+Runs the MTEB STS-Benchmark lane: embeds sentence pairs through an Ollama embedding model and
+reports Spearman / Pearson correlation against the gold scores.
 
 ```sh
 swift run manifold-eval mteb --dataset fixture --ollama-model nomic-embed-text --out MTEB.md
@@ -174,7 +292,9 @@ swift run manifold-eval mteb --dataset fixture --ollama-model nomic-embed-text -
 ```
 
 Requires Ollama at `localhost:11434` with the embedding model pulled. Omitting `--ollama-model`
-prints setup instructions and exits `0` (a skip, not an error).
+prints setup instructions and exits `0` — a **skip, not an error** (absence ≠ failure).
+
+---
 
 ### `diff`
 
@@ -182,6 +302,10 @@ The divergence-triage lane. Renders a prompt **once** (from raw text, or from ch
 GGUF's embedded `chat_template`), drives Ollama N times as a determinism control, optionally shells
 an external `--llama-runner` against the **same prompt bytes**, triages the result, and emits
 `DIVERGENCE.md`.
+
+**Why the same-bytes control.** Without it, a cross-backend comparison varies quant, checkpoint, and
+renderer simultaneously — the delta is confounded three ways and proves nothing. Rendering once and
+reusing the bytes is what makes a difference load-bearing.
 
 ```sh
 swift run manifold-eval diff --model mistral:7b-instruct \
@@ -200,19 +324,29 @@ swift run manifold-eval diff --model mistral:7b-instruct \
     --prompt-file probe.txt --top-k 0 --repeat-penalty 1.0 --out DIVERGENCE.md
 ```
 
-Exit codes: `0` = no actionable divergence (identical / sampler-nondeterminism); `1` = a control
+**Exit codes.** `0` = no actionable divergence (identical / sampler-nondeterminism); `1` = a control
 failure or genuine divergence a human should inspect (prompt / tokenizer / sampler-mismatch /
 genuine, or an Ollama-only determinism control that came back VARIANT); `3` = indeterminate — rerun
 with more `--repeats`; `4` = both outputs are the same short repeating unit at different lengths (a
 stopping-length artifact, not a content difference) — worth a look, but distinct from a genuine
 divergence.
 
+Only `genuineDivergence` is a bug candidate. The other classifications are the ones that waste a
+human's time when mistaken for findings — see
+[the divergence table](docs/CONCEPTS.md#divergence--bug-without-a-same-bytes-control).
+
+---
+
 ### `regress`
 
 The replay-regression moat — the check core can't run on itself. Replays one prompt across **two
-quants of the same model** on one backend (so quant is the only variable), scores both legs, and runs
-them through `RegressionGate`, emitting a deterministic `REGRESSION.md`. Greedy / `temp=0` by
+quants of the same model** on one backend (so quant is the only variable), scores both legs, and
+runs them through `RegressionGate`, emitting a deterministic `REGRESSION.md`. Greedy / `temp=0` by
 default — the only sampler the differential trusts.
+
+**Why core can't do this.** An in-core regression test is *green by construction*: deterministic
+replay ⇒ identical bytes ⇒ a stability assertion is tautological. The scorer only earns its keep
+when the bytes actually *differ*, which only happens across repos, across quants.
 
 ```sh
 swift run manifold-eval regress --backend ollama \
@@ -224,18 +358,24 @@ swift run manifold-eval regress --backend ollama \
 `--scorer contains|exact` (add `--ignore-case`); `--threshold` defaults to `0.05`. For llama.cpp,
 pass `--backend llama --llama-runner "<cmd>"` with GGUF paths as the model args.
 
-Exit codes: `0` = stable (no movement); `1` = moved (a human judges quant-drift vs. genuine
-regression — the gate flags, it does not adjudicate); `3` = indeterminate (a control failed, e.g.
-prompt-hash mismatch or unscorable output). See [docs/P4-VERIFICATION.md](docs/P4-VERIFICATION.md)
-for the live same-model cross-quant verification that found a real Q4 correctness loss.
+**Exit codes.** `0` = stable (no movement); `1` = moved; `3` = indeterminate (a control failed, e.g.
+prompt-hash mismatch or unscorable output).
+
+**`1` is not a regression verdict.** A re-quant can legitimately shift output. The gate flags
+movement for a human to judge quant-drift vs. genuine correctness loss; it does not adjudicate.
+[docs/P4-VERIFICATION.md](docs/P4-VERIFICATION.md) records the live same-model cross-quant run where
+this found a real Q4 correctness loss (q8 answered "Titan"; q4 answered "Rhea").
+
+---
 
 ### `toolloop` / `toolloop-generate`
 
-The multi-turn tool-loop conformance lane (issue #27): where `bfcl` scores "did the model call the
+The multi-turn tool-loop conformance lane (issue #27). Where `bfcl` scores "did the model call the
 right function" on one shot, this lane scores what happens *after* the call comes back — did the
-tool result **thread** into the next call's arguments and into the final answer? A cell can pass
-single-turn AST scoring and still mis-thread a result on turn 2; this lane is the instrument that
-sees it.
+tool result **thread** into the next call's arguments and into the final answer?
+
+**Why it exists.** A cell can pass single-turn AST scoring and still mis-thread a result on turn 2.
+Single-turn scoring reads that cell as healthy. This lane is the instrument that sees the break.
 
 `toolloop-generate` (the live consumer) drives an Ollama model over the corpus with each case's
 **scripted tools registered in a real `ToolRegistry`** — the production dispatch loop executes the
@@ -256,44 +396,53 @@ swift run manifold-eval toolloop-generate --ollama-model mistral-7b-tools:latest
 swift run manifold-eval toolloop --responses transcripts.jsonl --out TOOLLOOP.md
 ```
 
-Three probe axes per case, each optional (`—` = not probed, never a fake pass/fail): `first call`
-(turn-1 correctness, the BFCL overlap), `chained arg` (a later call must carry a sentinel that
-exists only in an earlier tool result, and must occur *after* that result — a matching call emitted
-before any result couldn't have read it and scores as a miss), and `final answer` (result sentinels
-surface in the answer). Chaining cases' target tools are **sentinel-gated**: any argument other
-than the sentinel gets an error payload, exactly as a real API would — so the sentinel cannot leak
-to an episode that never threaded it, and a broken chain produces a visibly broken answer. A case
-passes only when **every repeat passes every specified axis**; cross-repeat variance at `temp=0`
-is reported as `VARIANT` even when all repeats pass. Episodes that error or time out are recorded
-with an error marker and reported as *not measured* holes — never as capability zeros.
+**Three probe axes per case**, each optional (`—` = not probed, never a fake pass/fail):
 
-What it catches, concretely: `mistral-7b-tools` (q4_K_M, Ollama) passes all four result→answer
+- **first call** — turn-1 correctness (the BFCL overlap).
+- **chained arg** — a later call must carry a sentinel that exists only in an earlier tool result,
+  *and* must occur after that result. A matching call emitted before any result couldn't have read
+  it, and scores as a miss.
+- **final answer** — result sentinels surface in the answer.
+
+Chaining cases' target tools are **sentinel-gated**: any argument other than the sentinel gets an
+error payload, exactly as a real API would — so the sentinel cannot leak to an episode that never
+threaded it, and a broken chain produces a visibly broken answer.
+
+A case passes only when **every repeat passes every specified axis**; cross-repeat variance at
+`temp=0` is reported as `VARIANT` even when all repeats pass. Episodes that error or time out are
+recorded with an error marker and reported as *not measured* holes — never as capability zeros.
+
+**What it catches, concretely.** `mistral-7b-tools` (q4_K_M, Ollama) passes all four result→answer
 cases and the multi-call case 3/3 repeats bit-identically — and fails all three chaining cases the
 same way, emitting both calls in one pre-result batch with *placeholder arguments*
-(`get_balance(account_id: "$result.account_id")`): turn-1 scoring on those same episodes is clean,
+(`get_balance(account_id: "$result.account_id")`). Turn-1 scoring on those same episodes is clean,
 so a single-turn lane reads the cell as healthy while the turn-2 chain is broken. `gemma3-4b-tools`
-emits zero structured tool calls on this path (a ```` ```tool_code ```` text block instead) and
-then *hallucinates the tool result* — a measured capability zero for the cell, reported as such,
-never as a harness failure.
+emits zero structured tool calls on this path (a ```` ```tool_code ```` text block instead) and then
+*hallucinates the tool result* — a measured capability zero for the cell, reported as such, never as
+a harness failure.
 
-Exit codes: `0` = every case measured, passed, and repeated deterministically; `1` = a measured
+**Exit codes.** `0` = every case measured, passed, and repeated deterministically; `1` = a measured
 threading failure or a `temp=0` VARIANT a human should inspect; `3` = indeterminate — nothing
 matched the corpus, or some cases have only missing/errored episodes (holes gate as reruns, not
 regressions).
+
+---
 
 ### `perf-bench`
 
 The local-inference performance harness's spine: **one HTTP driver** measures both `http-openai`
 (SSE `/v1/chat/completions`) and `http-ollama` (NDJSON `/api/generate`) lanes with the same
-instrumentation points, so TTFT and TPS mean the same thing across transports. It replaces an
-ad-hoc predecessor — three separate in-process Swift bench targets (core, `manifold-mlx`,
-`manifold-llama`) that each measured whatever model happened to be loaded locally, producing
-non-comparable numbers (a "core vs MLX" delta was routinely a 0.5B-vs-4B delta in disguise).
+instrumentation points, so TTFT and TPS mean the same thing across transports.
 
-A `BenchSpec` pins **one** `model_family` + generation protocol across every lane; every result
-carries that pin's hash (`specHash`), and `perf-bench`'s collator **refuses** to render a matrix
-whose results don't all share one hash — the apples-to-oranges mistake becomes a collation-time
-error, not a silent footgun.
+**Why it exists.** It replaces an ad-hoc predecessor — three separate in-process Swift bench targets
+(core, `manifold-mlx`, `manifold-llama`) that each measured whatever model happened to be loaded
+locally, producing non-comparable numbers. A "core vs MLX" delta was routinely a 0.5B-vs-4B delta in
+disguise.
+
+**The guard.** A `BenchSpec` pins **one** `model_family` + generation protocol across every lane;
+every result carries that pin's hash (`specHash`), and `perf-bench`'s collator **refuses** to render
+a matrix whose results don't all share one hash — the apples-to-oranges mistake becomes a
+collation-time error, not a silent footgun.
 
 ```sh
 swift run manifold-eval perf-bench --spec perf-spec.json \
@@ -318,15 +467,15 @@ swift run manifold-eval perf-bench --spec perf-spec.json \
 }
 ```
 
-Each lane runs optional cold-start (`measure_cold`: Ollama unload via `keep_alive: 0` + one measured
-reload), then 1 warmup (discarded) + N timed warm runs; **lanes always run strictly sequentially**,
-never concurrently — GPU contention between two locally-running engines corrupts throughput numbers,
-so `PerfRunner` has no concurrent code path to opt out of. `api_key_env` names an environment
-variable holding a bearer token (e.g. OMLX's `Authorization: Bearer <key>`) — specs are checked into
-the repo and never carry a secret value directly. `BenchSpec`'s protocol rejects a nonpositive
-`timed_runs` (and a negative `warmup_runs`) at construction/decode time, and `PerfRunner` checks every
-produced `BenchResult`'s per-run sample counts against it — a lane that silently drops or duplicates a
-timed run fails loud instead of quietly shipping a median over the wrong sample count.
+**Strictly sequential, by construction.** Each lane runs an optional cold-start pass
+(`measure_cold`: Ollama unload via `keep_alive: 0` + one measured reload), then 1 warmup (discarded)
++ N timed warm runs. Lanes **never** run concurrently — GPU contention between two locally-running
+engines corrupts throughput numbers, so `PerfRunner` has no concurrent code path to opt out of.
+
+**Sample counts are enforced, not assumed.** `BenchSpec`'s protocol rejects a nonpositive
+`timed_runs` (and a negative `warmup_runs`) at construction/decode time, and `PerfRunner` checks
+every produced `BenchResult`'s per-run sample counts against it — a lane that silently drops or
+duplicates a timed run fails loud instead of quietly shipping a median over the wrong sample count.
 
 **Native metrics (schema v2).** Ollama's final chunk already carries `load_duration`,
 `prompt_eval_count`/`prompt_eval_duration`, and `eval_count`/`eval_duration` — the driver records
@@ -338,23 +487,28 @@ retired in-process benches; the report's native-split table carries the decode-o
 `timed_runs ≥ 100`. Prefer a *latency* spec (20+ reps, tiny `max_tokens`) and a *throughput* spec
 (5 reps, 256+ tokens) rather than one undersampled run that pretends to publish p99.
 
-`--json-out` writes the raw per-lane `BenchResult` array (pretty JSON, sorted keys) for publication
-under a consumer repo's `docs/perf/`.
+**Secrets and output.** `api_key_env` names an environment variable holding a bearer token (e.g.
+OMLX's `Authorization: Bearer <key>`) — specs are checked into the repo and never carry a secret
+value directly. `--json-out` writes the raw per-lane `BenchResult` array (pretty JSON, sorted keys)
+for publication under a consumer repo's `docs/perf/`.
 
-Before running a spec against real hardware, write down your prediction for the TTFT/TPS delta you
-expect — a number that only confirms what you already assumed teaches you nothing about whether the
-harness (or the engine) is actually behaving as understood.
+**Before you run it against real hardware, write down your prediction** for the TTFT/TPS delta you
+expect. A number that only confirms what you already assumed teaches you nothing about whether the
+harness — or the engine — is actually behaving as understood.
 
-This spine measures HTTP-fronted lanes only. Peak/steady-state memory and cancellation latency need
-process ownership / in-process cancel (gated on ManifoldKit #2245 companion server hosts and a core
-E2E suite). Companion server hosts (`manifold-server-mlx`/`manifold-server-llama`) and in-process
-control lanes are follow-ups, not yet wired into this matrix.
+**Scope today.** This spine measures HTTP-fronted lanes only. Peak/steady-state memory and
+cancellation latency need process ownership / in-process cancel (gated on ManifoldKit #2245
+companion server hosts and a core E2E suite). Companion server hosts
+(`manifold-server-mlx`/`manifold-server-llama`) and in-process control lanes are follow-ups, not yet
+wired into this matrix.
+
+---
 
 ## Running real eval lanes
 
-The model-driven lanes (`mteb`, `diff`, `regress`, `bfcl-generate`, `ifeval-generate`, `toolloop-generate`) and the corpus-gated tests need
-local models and are gated behind env vars so `swift test` stays hermetic. Fetch the real corpora
-first:
+The model-driven lanes (`mteb`, `diff`, `regress`, `bfcl-generate`, `ifeval-generate`,
+`toolloop-generate`) and the corpus-gated tests need local models and are gated behind env vars so
+`swift test` stays hermetic. Fetch the real corpora first:
 
 ```sh
 scripts/fetch-corpora.sh                 # BFCL Gorilla v4 + MTEB STS-B (cached under ~/.cache/manifold-eval)
@@ -371,6 +525,10 @@ RUN_OLLAMA_LIVE=1 OLLAMA_MODEL=qwen2.5-0.5b swift test --filter IFEvalGenerateLi
 RUN_OLLAMA_LIVE=1 OLLAMA_MODEL=mistral-7b-tools:latest swift test --filter ToolLoopGenerateLiveTests
 RUN_PERF_LIVE=1 swift test --filter PerfHTTPDriverLiveTests   # needs a local Ollama + OpenAI-compatible server
 ```
+
+A green hermetic run means *the harness is intact* — never *the models still score the same*. Those
+are [two different tiers](docs/CONCEPTS.md#tier-1-vs-hardware-gated), and conflating them is how an
+assurance repo starts reading as a passing grade while measuring nothing.
 
 ## Architecture
 
@@ -397,6 +555,16 @@ Sources/
     Perf/                             perf-bench — BenchSpec/Result, HTTP driver, collator, report
 ```
 
+## Documentation
+
+| Doc | Answers |
+|---|---|
+| [docs/CONCEPTS.md](docs/CONCEPTS.md) | What the vocabulary means — the cell, same-bytes control, absence ≠ failure, exit codes |
+| [docs/ORIGINS.md](docs/ORIGINS.md) | Why this repo exists separately from ManifoldKit (three rejections and one override) |
+| [docs/EVAL-IMPROVEMENT-LOOP.md](docs/EVAL-IMPROVEMENT-LOOP.md) | What to do with eval output — sensor → triage → fix → re-measure |
+| [docs/P4-VERIFICATION.md](docs/P4-VERIFICATION.md) | Evidence that the regression gate works on real models |
+| [AGENTS.md](AGENTS.md) | How to work on this repo (build, test, constraints) |
+
 ## Roadmap
 
 | Phase | Deliverable | Status |
@@ -405,7 +573,9 @@ Sources/
 | **P2** | Differential comparator + same-bytes Cohort A + determinism pinning | ✅ shipped |
 | **P3** | BFCL-full + IFEval + MTEB lanes | ✅ shipped |
 | **P4** | `regress` — replay-regression gate over same-model cross-quant runs | ✅ shipped & verified |
-| **P5** | `core-bump.yml` lockstep automation | ✅ shipped (`workflow_dispatch`-driven until the org dispatch PAT is re-scoped; rot-guard/nightly cadence still deferred) |
+| **P5** | `core-bump.yml` lockstep automation | ✅ shipped — `workflow_dispatch`-driven until the org dispatch PAT is re-scoped |
+| — | Weekly Tier-1 CI rot-guard (`rot-guard.yml`) | ✅ shipped 2026-07-04 — Mondays 08:00 UTC, build + fixture tests only |
+| — | Scheduled cadence for the **model-bearing** sweep (live BFCL / IFEval / MTEB, cross-quant `regress`) | ⬜ **open** — on-demand local Apple-Silicon runs only; see the [status caveat](docs/EVAL-IMPROVEMENT-LOOP.md#status-caveat-as-of-2026-07) |
 | **P6** | `perf-bench` — spec-driven local-inference perf harness spine (HTTP driver over Ollama/OpenAI-compatible lanes) | ✅ spine shipped; server-host MLX/llama lanes follow once ManifoldKit's `ServerBackendProvider` seam lands |
 
 Design and phasing live in ManifoldKit's `docs/plans/manifold-eval-repo-v2-override.md`.

@@ -1,7 +1,8 @@
 # Origins — why `manifold-eval` exists
 
 > Heritage record for the independent assurance repo. The *what* and *how* live in the
-> [README](../README.md) and in ManifoldKit's `docs/plans/manifold-eval-repo-v2-override.md`.
+> [README](../README.md) and in ManifoldKit's `docs/plans/manifold-eval-repo-v2-override.md`; the
+> principles this history produced are stated as working definitions in [CONCEPTS.md](CONCEPTS.md).
 > This document captures the *why* — the decision history that produced the repo — because the
 > most valuable thing to carry across a repo split is the reasoning, and reasoning doesn't survive
 > in code.

@@ -1,19 +1,30 @@
 # P4 Replay-Regression Gate — Real-Model Verification
 
+> **This is a dated evidence record, not a specification.** It captures what was actually run on
+> 2026-06-30 and what the runs proved. It is deliberately not kept current — for how `regress` works
+> today, see the [README](../README.md#regress); for the concepts it rests on, see
+> [CONCEPTS.md](CONCEPTS.md).
+
 **Date:** 2026-06-30  
 **Branch:** `feat/p4-replay-gate-draft` (draft PR #8 — do not merge without human sign-off)  
 **Ran on:** Apple Silicon, macOS 26, Ollama 0.30.x, localhost:11434
 
----
+## What this document contains
 
-> **Update 2026-06-30 — moat now wired.** This document records the original
-> gate-logic verification on a *two-different-models* proxy. The replay-regression
-> moat is now a live product feature: the `manifold-eval regress` subcommand drives
-> `RegressionRunner` → `RegressionGate` → `RegressionReport`, the inert
-> `RecordReDriver` protocol was deleted (the gate needs only a `RawRun` producer),
-> and a genuine **same-model Q8-vs-Q4 cross-quant** verification lives in
-> `RegressionCrossQuantLiveTests`. The "What this does NOT prove" section below has
-> been updated accordingly.
+Two verification runs, in the order they happened:
+
+1. **A proxy run** (§ *What was run* → § *What this proves*) — the original gate-*logic* check, using
+   two *different models* as a stand-in for a re-quant. It proves the verdict arithmetic is sound,
+   but not that the gate tracks a real quantization change.
+2. **The genuine cross-quant run** (§ *Cross-quant verification*) — the same model at Q8 vs. Q4,
+   driven through the shipped `regress` subcommand. This is the one that closes the credibility
+   question, and it found a real correctness loss.
+
+Between the two, the moat became a live product feature: the `manifold-eval regress` subcommand
+drives `RegressionRunner` → `RegressionGate` → `RegressionReport`, and the inert `RecordReDriver`
+protocol was deleted (the gate needs only a `RawRun` producer).
+
+---
 
 ## What was run
 
@@ -105,8 +116,6 @@ using the same deterministic model for both legs guarantees identical scores.
 - **Production scorer quality.** The verification scorers (`SubstringRegressionScorer`,
   `ExactMatchRegressionScorer`) are deterministic binary scorers. A production deployment would
   use a calibrated scorer (AST-match, IFEval verifier, semantic similarity) tuned to the task.
-
----
 
 ---
 

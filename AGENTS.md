@@ -15,6 +15,29 @@ here means: a reproducible, deterministic, adversarial verdict on
 human rather than silently auto-adjudicated (see `docs/ORIGINS.md` for the
 incident that shaped this design).
 
+## Docs — read before changing behavior
+
+`docs/README.md` is the index. Do not re-derive the vocabulary from source
+comments; it is written down:
+
+- **`docs/CONCEPTS.md`** — the terms this repo's code and comments assume:
+  the `model × quant × backend × renderer` cell, the same-bytes control and
+  the five divergence classifications, *absence ≠ failure*, determinism
+  pinning, the four comparability guards, and the shared exit-code grammar
+  (`0` clean / `1` a human should look / `3` indeterminate / `4` artifact).
+  Source comments reference ORIGINS principles by number (`ORIGINS #3`,
+  `#7`) — those numbers are stable and point at
+  `docs/ORIGINS.md#principles-inherited-from-this-history-binding`.
+- **`docs/EVAL-IMPROVEMENT-LOOP.md`** — how the lanes feed triage and fixes,
+  plus the honest status of what is and isn't automated today.
+- **`README.md` → "How the suite fits together"** — why the corpus lanes
+  split into generator/scorer pairs, and which lane answers which question.
+
+Two invariants worth stating here because breaking them is easy and silent:
+**this repo emits evidence, never verdicts a human didn't make**, and a
+*measured* zero must stay a zero while an *unmeasured* cell must never
+render as one.
+
 ## Build & test
 
 ```sh
