@@ -7,9 +7,10 @@ name: Bump core pin (on ManifoldKit release)
 # (see ManifoldKit/ManifoldKit .github/workflows/release-please.yml,
 # notify-companions job). workflow_dispatch is provided for manual runs and
 # for catching this repo up to a release that shipped before this workflow
-# existed. NOTE: the org-move dispatch PAT is currently broken (see
-# ManifoldKit MEMORY notes on the org move), so workflow_dispatch is the
-# operative trigger for now — dispatch by hand until it's re-scoped.
+# existed. NOTE: the dispatch PAT was broken by the 2026-07 org move but has
+# since been re-scoped (~2026-07-03) — repository_dispatch is the operative
+# trigger again, and every bump since has fired that way. workflow_dispatch
+# is now only for catch-up/manual runs.
 #
 # Unlike the companion packages (manifold-mlx / manifold-llama), this repo
 # pins ManifoldKit with `exact:` rather than `.upToNextMinor(from:)` — eval
