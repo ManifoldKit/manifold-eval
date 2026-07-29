@@ -104,7 +104,7 @@ Lanes drive **local models on Apple Silicon** (real GGUFs / Ollama) — opt-in, 
 
 - **Sensor with no scheduler = the fuzz-cadence collapse** (per-PR → nightly → weekly → hand-run →
   silence). The weekly CI rot-guard defends the *Tier-1* half of this; the model-bearing half has no
-  scheduler yet (see [Status caveat](#status-caveat-as-of-2026-07)) and is therefore the half that
+  scheduler yet (see [AUTOMATION-STATUS.md](AUTOMATION-STATUS.md)) and is therefore the half that
   can still collapse.
 - **Divergence ≠ backlog.** The biggest waste is dispatching an implementer at a `promptDivergence` /
   `samplerNondeterminism` / `notMeasured` cell — noise dressed as work.
@@ -113,21 +113,23 @@ Lanes drive **local models on Apple Silicon** (real GGUFs / Ollama) — opt-in, 
 
 ---
 
-## Status caveat (as of 2026-07)
+## Status caveat — the loop is only half automated
 
-The automated cadence is **half live.** What each piece actually does today:
+**What runs on a schedule, and what doesn't, is stated once in
+[AUTOMATION-STATUS.md](AUTOMATION-STATUS.md)** — don't restate it here. The short version, and the
+part that bears on *this* document:
 
-| Piece | Status |
-|---|---|
-| CI **rot-guard** (`rot-guard.yml`) | ✅ **live** — weekly, Mondays 08:00 UTC. Tier-1 only: build + fixture tests against the current core pin. A green badge means *the surface still compiles and its contracts hold* — **never** *the models still score the same*. |
-| **Model-bearing sweep** (live BFCL / IFEval / MTEB, cross-quant `regress`) | ❌ **no scheduled cadence.** On-demand local Apple-Silicon runs only. This is the half that carries the credibility numbers. |
-| `core-bump.yml` lockstep | ✅ **live** — fires on ManifoldKit's `repository_dispatch` again. The dispatch PAT was broken by the 2026-07 org move; it was re-scoped around 2026-07-03 and every bump since has been dispatch-driven (last manual `workflow_dispatch`: 2026-07-03). |
+The rot-guard covers the **Tier-1** half (does it still compile, do the fixture contracts hold). The
+**model-bearing** half — live BFCL / IFEval / MTEB and cross-quant `regress`, the lanes that carry
+the credibility numbers — has **no scheduled cadence at all.** It runs on demand, locally.
 
-So for the signal that actually matters — did the cells move? — the maintainer is still the scheduler
-and the staleness check. That half of the loop is **human-cadenced, not CI-cadenced.**
+So for the signal that actually matters to this loop — *did the cells move?* — the maintainer is
+still the scheduler and the staleness check. That half is **human-cadenced, not CI-cadenced**, and
+the feedback edge that makes this a loop rather than a report only closes when a human chooses to
+close it.
 
-Why this caveat is load-bearing rather than a to-do: **stale assurance reads as a passing grade.** An
-eval repo that lags the implementation is worse than none, because a green rot-guard badge invites
-the reader to conclude something the rot-guard never measured. See
+Why that is load-bearing rather than a to-do: **stale assurance reads as a passing grade.** An eval
+repo that lags the implementation is worse than none, because a green badge invites the reader to
+conclude something the automation never measured. See
 [ORIGINS principle #8](ORIGINS.md#principles-inherited-from-this-history-binding) — *no owner, no
 repo* — which is explicitly recorded as **not yet fully satisfied**.

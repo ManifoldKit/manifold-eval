@@ -562,6 +562,7 @@ Sources/
 | [docs/CONCEPTS.md](docs/CONCEPTS.md) | What the vocabulary means — the cell, same-bytes control, absence ≠ failure, exit codes |
 | [docs/ORIGINS.md](docs/ORIGINS.md) | Why this repo exists separately from ManifoldKit (three rejections and one override) |
 | [docs/EVAL-IMPROVEMENT-LOOP.md](docs/EVAL-IMPROVEMENT-LOOP.md) | What to do with eval output — sensor → triage → fix → re-measure |
+| [docs/AUTOMATION-STATUS.md](docs/AUTOMATION-STATUS.md) | What runs automatically and what doesn't — the single source of truth, guarded by a test |
 | [docs/P4-VERIFICATION.md](docs/P4-VERIFICATION.md) | Evidence that the regression gate works on real models |
 | [AGENTS.md](AGENTS.md) | How to work on this repo (build, test, constraints) |
 
@@ -573,9 +574,13 @@ Sources/
 | **P2** | Differential comparator + same-bytes Cohort A + determinism pinning | ✅ shipped |
 | **P3** | BFCL-full + IFEval + MTEB lanes | ✅ shipped |
 | **P4** | `regress` — replay-regression gate over same-model cross-quant runs | ✅ shipped & verified |
-| **P5** | `core-bump.yml` lockstep automation | ✅ shipped — dispatch-driven again since the PAT was re-scoped ~2026-07-03 |
-| — | Weekly Tier-1 CI rot-guard (`rot-guard.yml`) | ✅ shipped 2026-07-04 — Mondays 08:00 UTC, build + fixture tests only |
-| — | Scheduled cadence for the **model-bearing** sweep (live BFCL / IFEval / MTEB, cross-quant `regress`) | ⬜ **open** — on-demand local Apple-Silicon runs only; see the [status caveat](docs/EVAL-IMPROVEMENT-LOOP.md#status-caveat-as-of-2026-07) |
+| **P5** | `core-bump.yml` lockstep automation | ✅ shipped |
+| — | Weekly Tier-1 CI rot-guard (`rot-guard.yml`) | ✅ shipped 2026-07-04 |
+| — | Scheduled cadence for the **model-bearing** sweep (live BFCL / IFEval / MTEB, cross-quant `regress`) | ⬜ **open** — on-demand local runs only |
+
+What each automation is triggered by, and what it does and doesn't prove, is stated once in
+[docs/AUTOMATION-STATUS.md](docs/AUTOMATION-STATUS.md) — and guarded by a test against the workflow
+files, so it can't quietly drift out of date the way this table's earlier wording did.
 | **P6** | `perf-bench` — spec-driven local-inference perf harness spine (HTTP driver over Ollama/OpenAI-compatible lanes) | ✅ spine shipped; server-host MLX/llama lanes follow once ManifoldKit's `ServerBackendProvider` seam lands |
 
 Design and phasing live in ManifoldKit's `docs/plans/manifold-eval-repo-v2-override.md`.

@@ -68,17 +68,22 @@ BFCL/MTEB corpora into `~/.cache/manifold-eval` for those local runs.
   `ConformanceRecord` output) because `llama_backend_init` is
   once-per-process and MLX needs serialized in-process Metal — see
   ManifoldKit #982 and the plan doc referenced in `Package.swift`.
-- `core-bump.yml` auto-rewrites the exact pin on a ManifoldKit release
-  (`repository_dispatch`), rebuilds/tests, and opens+admin-merges a
-  **`chore:`** PR — deliberately release-inert, so a pin bump does not trip
-  release-please (releases here should cut only from eval's own `feat:`/
+- **Automation status is stated in exactly one place:
+  `docs/AUTOMATION-STATUS.md`** — triggers, cadence, and what each workflow
+  does and doesn't prove. Don't restate any of it here or in the README;
+  `AutomationClaimsTests` derives those facts from the workflow files and
+  fails when a doc disagrees, and it also fails if another doc hard-codes a
+  cron. Add a new workflow ⇒ add its row there.
+- `core-bump.yml` auto-rewrites the exact pin on a ManifoldKit release,
+  rebuilds/tests, and opens+admin-merges a release-inert PR (a pin bump must
+  not trip release-please; releases here cut only from eval's own `feat:`/
   `fix:` work). Gated on `RELEASE_AUTOMERGE_TOKEN`; if that secret is absent
-  it just leaves the PR open. The dispatch PAT broken by the 2026-07 org
-  move **has been re-scoped** (~2026-07-03) — every bump since has fired on
-  `repository_dispatch`, so no hand-dispatch is needed; `workflow_dispatch`
-  remains available for catch-up runs.
-- CI (`ci.yml`) skips draft PRs by design (draft = zero-CI staging area);
-  it only runs on ready-for-review PRs or pushes to `main`.
+  it just leaves the PR open.
+- CI (`ci.yml`) skips draft PRs by design (draft = zero-CI staging area).
+  The skip lives in the org reusable workflow, so the caller-side
+  `pull_request: types:` list must keep `ready_for_review` — without it a PR
+  opened as draft never fires an event this workflow subscribes to when
+  marked ready, and CI would never run.
 - A dirty stray worktree, `~/Repos/manifold-eval-overnight` (modified
   `Package.swift`/`Package.resolved`, untracked `.overnight-runs/`), exists
   outside the normal worktree container — do not touch it; it is tracked
