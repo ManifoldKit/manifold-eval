@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.4](https://github.com/ManifoldKit/manifold-eval/compare/v0.1.3...v0.1.4) (2026-07-29)
+
+
+### Features
+
+* **perf:** capture Ollama load/prefill/decode split and cold-start ([#56](https://github.com/ManifoldKit/manifold-eval/issues/56)) ([7eb89b7](https://github.com/ManifoldKit/manifold-eval/commit/7eb89b76bf6e8422e2222bfd40069e3229d3469b))
+
+
+### Bug Fixes
+
+* **ci:** stop path-filtering PRs so the required check can report ([#63](https://github.com/ManifoldKit/manifold-eval/issues/63)) ([12ffae5](https://github.com/ManifoldKit/manifold-eval/commit/12ffae5957f6dca8d8a327da0e246c5ba8d4db7c))
+* **perf:** correct specHash workload identity + add publication plumbing ([#53](https://github.com/ManifoldKit/manifold-eval/issues/53)) ([fcda579](https://github.com/ManifoldKit/manifold-eval/commit/fcda579edd4787fa1df0d12d1e7dc47816c7e647))
+
 ## [0.1.3](https://github.com/ManifoldKit/manifold-eval/compare/v0.1.2...v0.1.3) (2026-07-20)
 
 
