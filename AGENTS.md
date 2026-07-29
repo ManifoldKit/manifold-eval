@@ -69,11 +69,14 @@ BFCL/MTEB corpora into `~/.cache/manifold-eval` for those local runs.
   once-per-process and MLX needs serialized in-process Metal — see
   ManifoldKit #982 and the plan doc referenced in `Package.swift`.
 - `core-bump.yml` auto-rewrites the exact pin on a ManifoldKit release
-  (`repository_dispatch`), rebuilds/tests, and opens+admin-merges a `fix:`
-  PR — gated on `RELEASE_AUTOMERGE_TOKEN`; if that secret is absent it just
-  leaves the PR open. The org-move dispatch PAT is currently broken per
-  ManifoldKit's own notes, so `workflow_dispatch` is the operative trigger
-  for now — dispatch by hand.
+  (`repository_dispatch`), rebuilds/tests, and opens+admin-merges a
+  **`chore:`** PR — deliberately release-inert, so a pin bump does not trip
+  release-please (releases here should cut only from eval's own `feat:`/
+  `fix:` work). Gated on `RELEASE_AUTOMERGE_TOKEN`; if that secret is absent
+  it just leaves the PR open. The dispatch PAT broken by the 2026-07 org
+  move **has been re-scoped** (~2026-07-03) — every bump since has fired on
+  `repository_dispatch`, so no hand-dispatch is needed; `workflow_dispatch`
+  remains available for catch-up runs.
 - CI (`ci.yml`) skips draft PRs by design (draft = zero-CI staging area);
   it only runs on ready-for-review PRs or pushes to `main`.
 - A dirty stray worktree, `~/Repos/manifold-eval-overnight` (modified

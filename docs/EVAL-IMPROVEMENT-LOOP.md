@@ -121,7 +121,7 @@ The automated cadence is **half live.** What each piece actually does today:
 |---|---|
 | CI **rot-guard** (`rot-guard.yml`) | ✅ **live** — weekly, Mondays 08:00 UTC. Tier-1 only: build + fixture tests against the current core pin. A green badge means *the surface still compiles and its contracts hold* — **never** *the models still score the same*. |
 | **Model-bearing sweep** (live BFCL / IFEval / MTEB, cross-quant `regress`) | ❌ **no scheduled cadence.** On-demand local Apple-Silicon runs only. This is the half that carries the credibility numbers. |
-| `core-bump.yml` lockstep | ⚠️ **`workflow_dispatch` / manual-driven** until the org dispatch PAT is re-scoped (degraded since the 2026-07 org move). |
+| `core-bump.yml` lockstep | ✅ **live** — fires on ManifoldKit's `repository_dispatch` again. The dispatch PAT was broken by the 2026-07 org move; it was re-scoped around 2026-07-03 and every bump since has been dispatch-driven (last manual `workflow_dispatch`: 2026-07-03). |
 
 So for the signal that actually matters — did the cells move? — the maintainer is still the scheduler
 and the staleness check. That half of the loop is **human-cadenced, not CI-cadenced.**

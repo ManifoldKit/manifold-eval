@@ -573,7 +573,7 @@ Sources/
 | **P2** | Differential comparator + same-bytes Cohort A + determinism pinning | ✅ shipped |
 | **P3** | BFCL-full + IFEval + MTEB lanes | ✅ shipped |
 | **P4** | `regress` — replay-regression gate over same-model cross-quant runs | ✅ shipped & verified |
-| **P5** | `core-bump.yml` lockstep automation | ✅ shipped — `workflow_dispatch`-driven until the org dispatch PAT is re-scoped |
+| **P5** | `core-bump.yml` lockstep automation | ✅ shipped — dispatch-driven again since the PAT was re-scoped ~2026-07-03 |
 | — | Weekly Tier-1 CI rot-guard (`rot-guard.yml`) | ✅ shipped 2026-07-04 — Mondays 08:00 UTC, build + fixture tests only |
 | — | Scheduled cadence for the **model-bearing** sweep (live BFCL / IFEval / MTEB, cross-quant `regress`) | ⬜ **open** — on-demand local Apple-Silicon runs only; see the [status caveat](docs/EVAL-IMPROVEMENT-LOOP.md#status-caveat-as-of-2026-07) |
 | **P6** | `perf-bench` — spec-driven local-inference perf harness spine (HTTP driver over Ollama/OpenAI-compatible lanes) | ✅ spine shipped; server-host MLX/llama lanes follow once ManifoldKit's `ServerBackendProvider` seam lands |
