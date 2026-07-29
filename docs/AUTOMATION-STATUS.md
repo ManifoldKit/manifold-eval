@@ -24,13 +24,12 @@ table and `swift test` goes red.
 
 Three further guarded facts:
 
-- **CI runs on every PR, including release PRs.** `ci.yml` path-ignores `CHANGELOG.md` /
-  `.release-please-manifest.json` on **`push` only, never on `pull_request`**. That asymmetry is
-  load-bearing: `build-test / build-and-test` is a *required* check on main, and a workflow skipped
-  by path filtering never reports it — the check sits pending and the PR is blocked forever. Filtering
-  release PRs made every one of them mergeable only by admin bypass (releases 0.1.1–0.1.4 here all
-  merged with zero checks, as did every release in manifold-mlx and manifold-llama). **Do not re-add
-  a `paths-ignore` under `pull_request`** — a test fails if you do.
+- **`ci.yml` has no path filter on `pull_request`** — it path-ignores `CHANGELOG.md` /
+  `.release-please-manifest.json` on **`push` only**. The asymmetry is deliberate:
+  `build-test / build-and-test` is a *required* check on main, and a workflow skipped by path
+  filtering never reports it — the check sits pending and the PR is blocked. **Do not re-add a
+  `paths-ignore` under `pull_request`**; a test fails if you do. (What this guard does *not* assert
+  is that CI actually runs on release PRs — see *Release-PR checks* below.)
 - **Core-bump commits `chore:`** — deliberately release-inert, so a pin bump does not open a patch
   release PR. Releases here cut only from this repo's own `feat:` / `fix:` work.
 - **The rot-guard is Tier-1 only** — `swift build --build-tests` + `swift test`, no models, no
@@ -58,6 +57,37 @@ Evidence at time of writing (`gh run list --workflow=core-bump.yml`):
 
 So no hand-dispatch is needed. `workflow_dispatch` remains available for catch-up runs. Re-check with
 the command above; if the newest runs are `workflow_dispatch`, the PAT has regressed again.
+
+### Release-PR checks — *unresolved as of 2026-07-29*
+
+**Release-please PRs report no checks at all, and it is not yet proven why.** Releases 0.1.1, 0.1.2
+and 0.1.3 each merged with an empty `statusCheckRollup` (admin bypass; `enforce_admins` is `false`),
+and **0.1.4 (#54) is open and `BLOCKED` right now**. The four most recent releases in each of
+manifold-mlx and manifold-llama look the same.
+
+One cause is certain: `ci.yml` used to path-ignore exactly the two files a release PR touches, and a
+path-skipped workflow never reports a required check. That filter is now removed from `pull_request`.
+
+What is **not** established is whether that was the *only* blocker:
+
+```sh
+gh api "repos/ManifoldKit/manifold-eval/actions/runs?branch=release-please--branches--main"
+#   → total_count: 0
+```
+
+Zero runs fits two explanations equally — the filter excluded them, *or* no workflow run is created
+for these PRs at all (release-please posts as `app/github-actions` using the default `GITHUB_TOKEN`,
+and `companion-release-please.yml` passes no `token:`). ManifoldKit core is evidence for the second:
+its release PRs are **not** path-excluded, yet still report zero checks, with runs sitting
+`action_required`.
+
+**How to settle it:** on the next release PR, re-run the command above. Runs present and green ⇒ the
+path filter was the whole story. Still empty, or `action_required` ⇒ the remedy is a token that
+triggers workflows for release-please (an App or PAT), not a path change. Core's
+`ci-required-test-shim.yml` is the estate's other pattern for this, but it is itself
+`pull_request`-triggered, so it cannot help if no run is created.
+
+Until then, expect release PRs to still need a manual merge.
 
 ### Draft PRs — *red on purpose, as of 2026-07-29*
 
