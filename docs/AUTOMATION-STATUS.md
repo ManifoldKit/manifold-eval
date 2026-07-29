@@ -17,7 +17,7 @@ table and `swift test` goes red.
 
 | Automation | File | Triggers | Cadence |
 |---|---|---|---|
-| CI | `ci.yml` | `push` (main), `pull_request` | every push to main; **every** PR, drafts included (a draft gets a deliberate red — see below) |
+| CI | `ci.yml` | `push` (main), `pull_request` | every push to main **except** changelog/manifest-only; **every** PR, drafts included (a draft gets a deliberate red — see below) |
 | Rot-guard | `rot-guard.yml` | `schedule` `0 8 * * 1`, `workflow_dispatch` | weekly, Mondays 08:00 UTC |
 | Core pin bump | `core-bump.yml` | `repository_dispatch`, `workflow_dispatch` | every ManifoldKit release |
 | Release | `release-please.yml` | `push` (main), `workflow_dispatch` | every merge to main |
