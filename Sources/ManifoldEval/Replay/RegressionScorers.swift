@@ -15,30 +15,30 @@ import Foundation
 /// tasks where any drift is a real movement.
 public struct ExactMatchRegressionScorer: RegressionScorer {
 
-    public let expected: String
-    public let caseSensitive: Bool
-    public let trimWhitespace: Bool
+  public let expected: String
+  public let caseSensitive: Bool
+  public let trimWhitespace: Bool
 
-    public init(expected: String, caseSensitive: Bool = true, trimWhitespace: Bool = true) {
-        self.expected = expected
-        self.caseSensitive = caseSensitive
-        self.trimWhitespace = trimWhitespace
-    }
+  public init(expected: String, caseSensitive: Bool = true, trimWhitespace: Bool = true) {
+    self.expected = expected
+    self.caseSensitive = caseSensitive
+    self.trimWhitespace = trimWhitespace
+  }
 
-    public func score(_ output: String) throws -> Double? {
-        normalise(output) == normalise(expected) ? 1.0 : 0.0
-    }
+  public func score(_ output: String) throws -> Double? {
+    normalise(output) == normalise(expected) ? 1.0 : 0.0
+  }
 
-    private func normalise(_ s: String) -> String {
-        var v = s
-        if trimWhitespace { v = v.trimmingCharacters(in: .whitespacesAndNewlines) }
-        // Locale-independent fold: a locale-aware lowercase can map differently
-        // across the user's region (the Turkish-i trap), which would make the
-        // score non-reproducible across machines — exactly what an assurance
-        // scorer must avoid.
-        if !caseSensitive { v = v.lowercased() }
-        return v
-    }
+  private func normalise(_ s: String) -> String {
+    var v = s
+    if trimWhitespace { v = v.trimmingCharacters(in: .whitespacesAndNewlines) }
+    // Locale-independent fold: a locale-aware lowercase can map differently
+    // across the user's region (the Turkish-i trap), which would make the
+    // score non-reproducible across machines — exactly what an assurance
+    // scorer must avoid.
+    if !caseSensitive { v = v.lowercased() }
+    return v
+  }
 }
 
 /// Scores `1.0` when the output contains `expected` as a substring, else `0.0`.
@@ -48,18 +48,18 @@ public struct ExactMatchRegressionScorer: RegressionScorer {
 /// without requiring an exact match. Use exact-match for closed-form tasks.
 public struct SubstringRegressionScorer: RegressionScorer {
 
-    public let expected: String
-    public let caseSensitive: Bool
+  public let expected: String
+  public let caseSensitive: Bool
 
-    public init(expected: String, caseSensitive: Bool = true) {
-        self.expected = expected
-        self.caseSensitive = caseSensitive
-    }
+  public init(expected: String, caseSensitive: Bool = true) {
+    self.expected = expected
+    self.caseSensitive = caseSensitive
+  }
 
-    public func score(_ output: String) throws -> Double? {
-        if caseSensitive {
-            return output.contains(expected) ? 1.0 : 0.0
-        }
-        return output.lowercased().contains(expected.lowercased()) ? 1.0 : 0.0
+  public func score(_ output: String) throws -> Double? {
+    if caseSensitive {
+      return output.contains(expected) ? 1.0 : 0.0
     }
+    return output.lowercased().contains(expected.lowercased()) ? 1.0 : 0.0
+  }
 }

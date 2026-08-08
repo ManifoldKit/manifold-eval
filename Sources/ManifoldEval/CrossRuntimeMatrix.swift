@@ -10,18 +10,18 @@ import ManifoldTools
 /// the comparison spans a core-commit or tooling boundary that makes it suspect.
 public enum CrossRuntimeMatrix {
 
-    public static let defaultTitle = "Cross-Runtime Tool-Calling Conformance Matrix"
+  public static let defaultTitle = "Cross-Runtime Tool-Calling Conformance Matrix"
 
-    public static func render(_ result: CollationResult, title: String = defaultTitle) -> String {
-        var out = ""
-        if !result.diagnostics.isEmpty {
-            out += "> **Collation diagnostics**\n>\n"
-            for diagnostic in result.diagnostics {
-                out += "> - **\(diagnostic.severity.rawValue.uppercased())** — \(diagnostic.message)\n"
-            }
-            out += "\n"
-        }
-        out += MatrixRenderer.render(result.records, title: title)
-        return out
+  public static func render(_ result: CollationResult, title: String = defaultTitle) -> String {
+    var out = ""
+    if !result.diagnostics.isEmpty {
+      out += "> **Collation diagnostics**\n>\n"
+      for diagnostic in result.diagnostics {
+        out += "> - **\(diagnostic.severity.rawValue.uppercased())** — \(diagnostic.message)\n"
+      }
+      out += "\n"
     }
+    out += MatrixRenderer.render(result.records, title: title)
+    return out
+  }
 }

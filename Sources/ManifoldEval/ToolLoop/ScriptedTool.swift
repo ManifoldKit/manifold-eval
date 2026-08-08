@@ -13,36 +13,37 @@ import ManifoldInference
 /// tool bytes — a determinism control, not a shortcut.
 public struct ScriptedTool: ToolExecutor {
 
-    public let definition: ToolDefinition
-    private let script: ToolScript
+  public let definition: ToolDefinition
+  private let script: ToolScript
 
-    /// Read-only by construction: scripted lookups have no side effects, so
-    /// concurrent dispatch is safe and no approval gate applies.
-    public var supportsConcurrentDispatch: Bool { true }
-    public var requiresApproval: Bool { false }
+  /// Read-only by construction: scripted lookups have no side effects, so
+  /// concurrent dispatch is safe and no approval gate applies.
+  public var supportsConcurrentDispatch: Bool { true }
+  public var requiresApproval: Bool { false }
 
-    public init(spec: ScriptedToolSpec) {
-        self.definition = spec.definition
-        self.script = spec.script
+  public init(spec: ScriptedToolSpec) {
+    self.definition = spec.definition
+    self.script = spec.script
+  }
+
+  public func execute(arguments: JSONSchemaValue) async throws -> ToolResult {
+    // callId is stamped by ToolRegistry from the incoming ToolCall; an
+    // empty placeholder here is the documented contract.
+    ToolResult(callId: "", content: resolveContent(arguments: arguments))
+  }
+
+  /// Selects the scripted payload: argument-keyed when the script asks for
+  /// it and the invocation carries a matching value, else the fixed result.
+  private func resolveContent(arguments: JSONSchemaValue) -> String {
+    guard let key = script.argumentKey,
+      let table = script.resultsByArgument,
+      case .object(let object) = arguments,
+      let value = object[key],
+      case .string(let stringValue) = value,
+      let keyed = table[stringValue]
+    else {
+      return script.result
     }
-
-    public func execute(arguments: JSONSchemaValue) async throws -> ToolResult {
-        // callId is stamped by ToolRegistry from the incoming ToolCall; an
-        // empty placeholder here is the documented contract.
-        ToolResult(callId: "", content: resolveContent(arguments: arguments))
-    }
-
-    /// Selects the scripted payload: argument-keyed when the script asks for
-    /// it and the invocation carries a matching value, else the fixed result.
-    private func resolveContent(arguments: JSONSchemaValue) -> String {
-        guard let key = script.argumentKey,
-              let table = script.resultsByArgument,
-              case .object(let object) = arguments,
-              let value = object[key],
-              case .string(let stringValue) = value,
-              let keyed = table[stringValue] else {
-            return script.result
-        }
-        return keyed
-    }
+    return keyed
+  }
 }

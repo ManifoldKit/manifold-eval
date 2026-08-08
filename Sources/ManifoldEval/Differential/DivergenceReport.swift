@@ -7,99 +7,101 @@ import Foundation
 /// behaviour, not changed wall-clock.
 public enum DivergenceReport {
 
-    public static func render(_ outcome: DifferentialOutcome, title: String = "Differential Eval — DIVERGENCE") -> String {
-        var out = "# \(title)\n\n"
-        out += "Prompt SHA-256: `\(outcome.promptSha256)`\n\n"
+  public static func render(
+    _ outcome: DifferentialOutcome, title: String = "Differential Eval — DIVERGENCE"
+  ) -> String {
+    var out = "# \(title)\n\n"
+    out += "Prompt SHA-256: `\(outcome.promptSha256)`\n\n"
 
-        out += renderDeterminism(outcome.ollama, legName: "Ollama")
-        if let llama = outcome.llama {
-            out += renderDeterminism(llama, legName: "External runner")
-        }
-
-        if let comparison = outcome.comparison {
-            out += renderComparison(comparison)
-        } else {
-            out += "## Comparison\n\n"
-            out += "_No second leg — Ollama-only run. This is a determinism control; "
-            out += "cross-backend triage requires an external `--llama-runner`._\n\n"
-        }
-
-        return out
+    out += renderDeterminism(outcome.ollama, legName: "Ollama")
+    if let llama = outcome.llama {
+      out += renderDeterminism(llama, legName: "External runner")
     }
 
-    private static func renderDeterminism(_ report: DeterminismReport, legName: String) -> String {
-        var out = "## \(legName) determinism\n\n"
-        let backend = report.backend ?? "?"
-        let model = report.representative?.model ?? "?"
-        out += "- backend: `\(backend)`  model: `\(model)`\n"
-        out += "- repeats: \(report.repeatCount)\n"
-        if !report.wasAssessed {
-            out += "- determinism: **not assessed** (need >= 2 repeats)\n"
-        } else if report.isDeterministic {
-            out += "- determinism: **stable** (all \(report.repeatCount) repeats identical)\n"
-        } else {
-            out += "- determinism: **VARIANT** — \(report.distinctOutputs.count) distinct outputs across "
-            out += "\(report.repeatCount) repeats (sampler nondeterminism / cold-load outlier)\n"
-        }
-        // Show each distinct output so a human can eyeball the variance — the
-        // transcript spot-check the plan insists stays in the loop (§9).
-        for (index, output) in report.distinctOutputs.enumerated() {
-            out += "  - output #\(index): \(fence(output))\n"
-        }
-        out += "\n"
-        return out
+    if let comparison = outcome.comparison {
+      out += renderComparison(comparison)
+    } else {
+      out += "## Comparison\n\n"
+      out += "_No second leg — Ollama-only run. This is a determinism control; "
+      out += "cross-backend triage requires an external `--llama-runner`._\n\n"
     }
 
-    private static func renderComparison(_ record: DifferentialRecord) -> String {
-        var out = "## Comparison\n\n"
-        out += "- cohort: **\(record.cohort.rawValue)**\n"
-        out += "- verdict: **\(record.divergence.rawValue)**\n"
-        if let bos = record.detectedBOS {
-            out += "- detected BOS id (token-stream asymmetry): `\(bos)`\n"
-        }
-        out += "\n> \(verdictGloss(record.divergence))\n\n"
-        return out
-    }
+    return out
+  }
 
-    private static func verdictGloss(_ divergence: Divergence) -> String {
-        switch divergence {
-        case .identical:
-            return "Same prompt, same output — no divergence."
-        case .promptDivergence:
-            return "**Prompt hashes differ — the same-bytes control FAILED.** The comparison is "
-                + "invalid (harness/render bug, not a model finding). Fix the control before trusting any verdict."
-        case .samplerNondeterminism:
-            return "Outputs differ but a backend is non-reproducible across its own repeats — the "
-                + "difference is sampler noise, not signal."
-        case .tokenizerDivergence:
-            return "Same prompt string, but the input token streams differ after BOS normalisation — a "
-                + "vocab/tokenisation mismatch fed the model different inputs."
-        case .samplerMismatch:
-            return "Same prompt and tokens, but the two legs ran under different sampler settings "
-                + "(temperature / topK / repeatPenalty) — the difference is config, not the model. "
-                + "Re-run both legs under the same sampler before trusting any verdict."
-        case .indeterminate:
-            return "A leg's determinism was never assessed (fewer than 2 repeats), so reproducibility "
-                + "is unknown — neither a clean pass nor a confirmed divergence. Re-run with more "
-                + "`--repeats` to resolve it."
-        case .degenerateRepetitionLengthMismatch:
-            return "Same prompt and tokens, both backends reproducible — but both outputs are the "
-                + "*same* short repeating unit, differing only in how many times it repeated before "
-                + "each backend's own stopping criterion fired. **This is a repetition/stopping-length "
-                + "artifact, not necessarily a model output difference** — worth a look (why did the two "
-                + "backends stop at different lengths?), but distinct from a genuine content divergence."
-        case .genuineDivergence:
-            return "Same prompt, both backends reproducible, same input tokens — outputs still differ. "
-                + "**Genuine divergence: worth a human.**"
-        }
+  private static func renderDeterminism(_ report: DeterminismReport, legName: String) -> String {
+    var out = "## \(legName) determinism\n\n"
+    let backend = report.backend ?? "?"
+    let model = report.representative?.model ?? "?"
+    out += "- backend: `\(backend)`  model: `\(model)`\n"
+    out += "- repeats: \(report.repeatCount)\n"
+    if !report.wasAssessed {
+      out += "- determinism: **not assessed** (need >= 2 repeats)\n"
+    } else if report.isDeterministic {
+      out += "- determinism: **stable** (all \(report.repeatCount) repeats identical)\n"
+    } else {
+      out += "- determinism: **VARIANT** — \(report.distinctOutputs.count) distinct outputs across "
+      out += "\(report.repeatCount) repeats (sampler nondeterminism / cold-load outlier)\n"
     }
+    // Show each distinct output so a human can eyeball the variance — the
+    // transcript spot-check the plan insists stays in the loop (§9).
+    for (index, output) in report.distinctOutputs.enumerated() {
+      out += "  - output #\(index): \(fence(output))\n"
+    }
+    out += "\n"
+    return out
+  }
 
-    /// Render output text safely inside the report — single-line as inline code,
-    /// multi-line as a fenced block, so newlines don't corrupt the Markdown.
-    private static func fence(_ text: String) -> String {
-        if text.contains("\n") {
-            return "\n```\n\(text)\n```"
-        }
-        return "`\(text)`"
+  private static func renderComparison(_ record: DifferentialRecord) -> String {
+    var out = "## Comparison\n\n"
+    out += "- cohort: **\(record.cohort.rawValue)**\n"
+    out += "- verdict: **\(record.divergence.rawValue)**\n"
+    if let bos = record.detectedBOS {
+      out += "- detected BOS id (token-stream asymmetry): `\(bos)`\n"
     }
+    out += "\n> \(verdictGloss(record.divergence))\n\n"
+    return out
+  }
+
+  private static func verdictGloss(_ divergence: Divergence) -> String {
+    switch divergence {
+    case .identical:
+      return "Same prompt, same output — no divergence."
+    case .promptDivergence:
+      return "**Prompt hashes differ — the same-bytes control FAILED.** The comparison is "
+        + "invalid (harness/render bug, not a model finding). Fix the control before trusting any verdict."
+    case .samplerNondeterminism:
+      return "Outputs differ but a backend is non-reproducible across its own repeats — the "
+        + "difference is sampler noise, not signal."
+    case .tokenizerDivergence:
+      return "Same prompt string, but the input token streams differ after BOS normalisation — a "
+        + "vocab/tokenisation mismatch fed the model different inputs."
+    case .samplerMismatch:
+      return "Same prompt and tokens, but the two legs ran under different sampler settings "
+        + "(temperature / topK / repeatPenalty) — the difference is config, not the model. "
+        + "Re-run both legs under the same sampler before trusting any verdict."
+    case .indeterminate:
+      return "A leg's determinism was never assessed (fewer than 2 repeats), so reproducibility "
+        + "is unknown — neither a clean pass nor a confirmed divergence. Re-run with more "
+        + "`--repeats` to resolve it."
+    case .degenerateRepetitionLengthMismatch:
+      return "Same prompt and tokens, both backends reproducible — but both outputs are the "
+        + "*same* short repeating unit, differing only in how many times it repeated before "
+        + "each backend's own stopping criterion fired. **This is a repetition/stopping-length "
+        + "artifact, not necessarily a model output difference** — worth a look (why did the two "
+        + "backends stop at different lengths?), but distinct from a genuine content divergence."
+    case .genuineDivergence:
+      return "Same prompt, both backends reproducible, same input tokens — outputs still differ. "
+        + "**Genuine divergence: worth a human.**"
+    }
+  }
+
+  /// Render output text safely inside the report — single-line as inline code,
+  /// multi-line as a fenced block, so newlines don't corrupt the Markdown.
+  private static func fence(_ text: String) -> String {
+    if text.contains("\n") {
+      return "\n```\n\(text)\n```"
+    }
+    return "`\(text)`"
+  }
 }
