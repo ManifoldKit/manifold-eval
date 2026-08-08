@@ -55,6 +55,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# This repo's default workflow permissions are WRITE (repo setting), so a
+# workflow with no permissions block here ran with a write GITHUB_TOKEN.
+# build-test only reads the tree (mirrors rot-guard.yml's stated posture).
+permissions:
+  contents: read
+
 jobs:
   build-test:
     uses: ManifoldKit/.github/.github/workflows/swift-ci.yml@main
