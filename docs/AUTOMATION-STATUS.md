@@ -21,6 +21,14 @@ table and `swift test` goes red.
 | Rot-guard | `rot-guard.yml` | `schedule` `0 8 * * 1`, `workflow_dispatch` | weekly, Mondays 08:00 UTC |
 | Core pin bump | `core-bump.yml` | `repository_dispatch`, `workflow_dispatch` | every ManifoldKit release |
 | Release | `release-please.yml` | `push` (main), `workflow_dispatch` | every merge to main |
+| CodeQL | `codeql.yml` | `push` (main), `pull_request` (main), `schedule` `0 6 * * 1` | every push/PR to main, plus a weekly baseline scan Mondays 06:00 UTC. Scans the `actions` language only — no Python in this repo today (contrast manifold-mlx, which also scans `python`). Swift is not analyzed: CodeQL's Swift tracer wraps every `swiftc` invocation, and on ManifoldKit/ManifoldKit that pushed build times past a 30-minute timeout — see that repo's `codeql.yml` for the full story. |
+| Dependency review | `dependency-review.yml` | `pull_request` | every PR that touches a dependency manifest |
+
+**Note:** `codeql.yml` and `dependency-review.yml` are added by estate#49 and are not yet covered by
+`AutomationClaimsTests` — `workflowFiles` there is a hardcoded four-file list
+(`ci.yml`/`rot-guard.yml`/`core-bump.yml`/`release-please.yml`) rather than a directory scan, so these
+two rows are hand-maintained for now, exactly the kind of drift this doc exists to prevent. Filed as
+a follow-up to extend the guard rather than fixed here.
 
 Three further guarded facts:
 
