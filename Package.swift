@@ -15,71 +15,71 @@ import PackageDescription
 // in-process Metal (§2.2 / ManifoldKit #982). One process linking all backends is
 // unbuildable; collation over separate-process records is the design.
 let package = Package(
-    name: "manifold-eval",
-    platforms: [
-        .macOS(.v15),
-    ],
-    products: [
-        .library(name: "ManifoldEval", targets: ["ManifoldEval"]),
-        .executable(name: "manifold-eval", targets: ["manifold-eval"]),
-    ],
-    dependencies: [
-        // EXACT pin, not a range: an assurance repo whose premise is comparability
-        // against a specific core binary must not float its own core dependency
-        // (the coreCommit guard is meaningless if the consumer drifts). core-bump.yml
-        // bumps this exact version on each core release (plan §10). v0.63.0 is the
-        // first tag carrying the ConformanceRecord / MatrixRenderer surface P1 uses.
-        .package(url: "https://github.com/ManifoldKit/ManifoldKit.git", exact: "0.75.0"),
-    ],
-    targets: [
-        .target(
-            name: "ManifoldEval",
-            dependencies: [
-                .product(name: "ManifoldTools", package: "ManifoldKit"),
-                // P2.1 prompt-rendering seam: render messages→prompt ONCE via the
-                // PUBLIC `ChatTemplate.format` (ManifoldInference) over the GGUF's
-                // embedded chat_template, read via `ModelInfo.chatTemplateRaw`
-                // (ManifoldModelCatalog). One renderer of record — see
-                // Differential/PromptRendering.swift.
-                .product(name: "ManifoldInference", package: "ManifoldKit"),
-                .product(name: "ManifoldModelCatalog", package: "ManifoldKit"),
-            ]
-        ),
-        .executableTarget(
-            name: "manifold-eval",
-            dependencies: [
-                "ManifoldEval",
-                .product(name: "ManifoldTools", package: "ManifoldKit"),
-                // `ManifoldEval` library stays backend-agnostic (both
-                // `BFCLLane` and `IFEvalLane`'s generate seams take responses
-                // from any source). `bfcl-generate` and `ifeval-generate` are
-                // the commands that need to actually drive a live model, so
-                // ManifoldOllama is scoped here, mirroring how ManifoldKit's
-                // own `manifold-tools` executable links `ManifoldOllama` while
-                // the backend-free runner logic stays in `ManifoldTools`.
-                .product(name: "ManifoldOllama", package: "ManifoldKit"),
-            ]
-        ),
-        .testTarget(
-            name: "ManifoldEvalTests",
-            dependencies: [
-                "ManifoldEval",
-                // EmbeddingBackend (from ManifoldContract via ManifoldInference) is needed
-                // for the MTEB test double (AlwaysFailEmbedder) and the live embedding tests.
-                .product(name: "ManifoldInference", package: "ManifoldKit"),
-                // @testable import for DiffCommand's argv-parsing tests — no network I/O
-                // is exercised (parseArguments is pure), so this stays hermetic.
-                "manifold-eval",
-                // Only used by the RUN_OLLAMA_LIVE=1-gated BFCLGenerateLiveTests and
-                // IFEvalGenerateLiveTests, which drive the real production
-                // generation/tool-injection path (InferenceService + OllamaBackend
-                // [+ BFCLRunner]) end-to-end — a stronger proof than a synthetic
-                // emit closure. Test-only; the ManifoldEval library itself stays
-                // backend-agnostic.
-                .product(name: "ManifoldOllama", package: "ManifoldKit"),
-                .product(name: "ManifoldTools", package: "ManifoldKit"),
-            ],
-            resources: [.copy("Fixtures")]
-        ),
-    ]
+  name: "manifold-eval",
+  platforms: [
+    .macOS(.v15)
+  ],
+  products: [
+    .library(name: "ManifoldEval", targets: ["ManifoldEval"]),
+    .executable(name: "manifold-eval", targets: ["manifold-eval"]),
+  ],
+  dependencies: [
+    // EXACT pin, not a range: an assurance repo whose premise is comparability
+    // against a specific core binary must not float its own core dependency
+    // (the coreCommit guard is meaningless if the consumer drifts). core-bump.yml
+    // bumps this exact version on each core release (plan §10). v0.63.0 is the
+    // first tag carrying the ConformanceRecord / MatrixRenderer surface P1 uses.
+    .package(url: "https://github.com/ManifoldKit/ManifoldKit.git", exact: "0.75.0")
+  ],
+  targets: [
+    .target(
+      name: "ManifoldEval",
+      dependencies: [
+        .product(name: "ManifoldTools", package: "ManifoldKit"),
+        // P2.1 prompt-rendering seam: render messages→prompt ONCE via the
+        // PUBLIC `ChatTemplate.format` (ManifoldInference) over the GGUF's
+        // embedded chat_template, read via `ModelInfo.chatTemplateRaw`
+        // (ManifoldModelCatalog). One renderer of record — see
+        // Differential/PromptRendering.swift.
+        .product(name: "ManifoldInference", package: "ManifoldKit"),
+        .product(name: "ManifoldModelCatalog", package: "ManifoldKit"),
+      ]
+    ),
+    .executableTarget(
+      name: "manifold-eval",
+      dependencies: [
+        "ManifoldEval",
+        .product(name: "ManifoldTools", package: "ManifoldKit"),
+        // `ManifoldEval` library stays backend-agnostic (both
+        // `BFCLLane` and `IFEvalLane`'s generate seams take responses
+        // from any source). `bfcl-generate` and `ifeval-generate` are
+        // the commands that need to actually drive a live model, so
+        // ManifoldOllama is scoped here, mirroring how ManifoldKit's
+        // own `manifold-tools` executable links `ManifoldOllama` while
+        // the backend-free runner logic stays in `ManifoldTools`.
+        .product(name: "ManifoldOllama", package: "ManifoldKit"),
+      ]
+    ),
+    .testTarget(
+      name: "ManifoldEvalTests",
+      dependencies: [
+        "ManifoldEval",
+        // EmbeddingBackend (from ManifoldContract via ManifoldInference) is needed
+        // for the MTEB test double (AlwaysFailEmbedder) and the live embedding tests.
+        .product(name: "ManifoldInference", package: "ManifoldKit"),
+        // @testable import for DiffCommand's argv-parsing tests — no network I/O
+        // is exercised (parseArguments is pure), so this stays hermetic.
+        "manifold-eval",
+        // Only used by the RUN_OLLAMA_LIVE=1-gated BFCLGenerateLiveTests and
+        // IFEvalGenerateLiveTests, which drive the real production
+        // generation/tool-injection path (InferenceService + OllamaBackend
+        // [+ BFCLRunner]) end-to-end — a stronger proof than a synthetic
+        // emit closure. Test-only; the ManifoldEval library itself stays
+        // backend-agnostic.
+        .product(name: "ManifoldOllama", package: "ManifoldKit"),
+        .product(name: "ManifoldTools", package: "ManifoldKit"),
+      ],
+      resources: [.copy("Fixtures")]
+    ),
+  ]
 )

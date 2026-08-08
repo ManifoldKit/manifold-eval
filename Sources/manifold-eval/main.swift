@@ -30,186 +30,212 @@ import ManifoldTools
 //   manifold-eval perf-bench --spec <spec.json> [--out PERF-MATRIX.md] [--title T]
 
 func die(_ message: String, code: Int32) -> Never {
-    FileHandle.standardError.write(Data("error: \(message)\n".utf8))
-    exit(code)
+  FileHandle.standardError.write(Data("error: \(message)\n".utf8))
+  exit(code)
 }
 
 func warn(_ message: String) {
-    FileHandle.standardError.write(Data("\(message)\n".utf8))
+  FileHandle.standardError.write(Data("\(message)\n".utf8))
 }
 
 let arguments = Array(CommandLine.arguments.dropFirst())
 guard let subcommand = arguments.first else {
-    print("usage:")
-    print("  manifold-eval collate <record.json>... [--out PATH] [--title T]")
-    print("  manifold-eval diff --model <ollama-tag> (--prompt-file P | --messages-file M --template-gguf G)")
-    print("                     [--llama-runner CMD] [--llama-model GGUF] [--repeats N] [--seed N]")
-    print("                     [--max-tokens N] [--temperature D] [--top-k N] [--repeat-penalty D] [--bos ID]")
-    print("                     [--cohort sameWeights|sameFamily|cloud] [--ollama-url URL]")
-    print("                     [--core-commit SHA] [--out DIVERGENCE.md]")
-    print("  manifold-eval ifeval --corpus <path> --responses <jsonl> [--out PATH]")
-    print("  manifold-eval ifeval-generate --ollama-model <tag> --corpus <path> --out <responses.jsonl>")
-    print("                     [--ollama-url URL] [--max-tokens N] [--concurrency N] [--timeout SECONDS]")
-    print("  manifold-eval bfcl   (--corpus <dir> | --gorilla-cache-dir <dir>) --responses <jsonl> [--out PATH]")
-    print("  manifold-eval bfcl-generate --ollama-model <tag> [--category simple|multiple|parallel|parallel_multiple|irrelevance|all]")
-    print("                     [--ollama-url URL] [--cache-dir DIR] --out <responses.jsonl> [--timeout SECONDS]")
-    print("  manifold-eval mteb   --dataset <path-or-fixture> [--ollama-model nomic-embed-text] [--out PATH]")
-    print("  manifold-eval regress --backend ollama|llama --baseline-model M --redriven-model M")
-    print("                     --prompt-file P --expected REF [--scorer contains|exact] [--ignore-case]")
-    print("                     [--threshold D] [--seed N] [--max-tokens N] [--temperature D]")
-    print("                     [--llama-runner CMD] [--ollama-url URL] [--core-commit SHA] [--out REGRESSION.md]")
-    print("  manifold-eval baseline <record.json>... --baseline-path PATH [--update]")
-    print("                     [--score-threshold D] [--max-age-hours N] [--out PATH]")
-    print("  manifold-eval triage --transcript <transcript.json> [--decide genuine|benign]")
-    print("                     [--bos ID|autoDetect|none] [--cohort sameWeights|sameFamily|cloud] [--out PATH]")
-    print("  manifold-eval dismiss --cell <id> --signature <hex> --reason <text> --ttl <seconds> [--ledger PATH]")
-    print("  manifold-eval dismissals [--ledger PATH] [--prune]")
-    print("  manifold-eval toolloop --responses <transcripts.jsonl> [--corpus <cases.jsonl>] [--title T] [--out PATH]")
-    print("  manifold-eval toolloop-generate --ollama-model <tag> --out <transcripts.jsonl>")
-    print("                     [--corpus <cases.jsonl>] [--repeats N] [--ollama-url URL]")
-    print("                     [--max-tool-iterations N] [--timeout SECONDS]")
-    print("  manifold-eval perf-bench --spec <spec.json> [--out PERF-MATRIX.md] [--title T]")
-    exit(2)
+  print("usage:")
+  print("  manifold-eval collate <record.json>... [--out PATH] [--title T]")
+  print(
+    "  manifold-eval diff --model <ollama-tag> (--prompt-file P | --messages-file M --template-gguf G)"
+  )
+  print("                     [--llama-runner CMD] [--llama-model GGUF] [--repeats N] [--seed N]")
+  print(
+    "                     [--max-tokens N] [--temperature D] [--top-k N] [--repeat-penalty D] [--bos ID]"
+  )
+  print("                     [--cohort sameWeights|sameFamily|cloud] [--ollama-url URL]")
+  print("                     [--core-commit SHA] [--out DIVERGENCE.md]")
+  print("  manifold-eval ifeval --corpus <path> --responses <jsonl> [--out PATH]")
+  print(
+    "  manifold-eval ifeval-generate --ollama-model <tag> --corpus <path> --out <responses.jsonl>")
+  print(
+    "                     [--ollama-url URL] [--max-tokens N] [--concurrency N] [--timeout SECONDS]"
+  )
+  print(
+    "  manifold-eval bfcl   (--corpus <dir> | --gorilla-cache-dir <dir>) --responses <jsonl> [--out PATH]"
+  )
+  print(
+    "  manifold-eval bfcl-generate --ollama-model <tag> [--category simple|multiple|parallel|parallel_multiple|irrelevance|all]"
+  )
+  print(
+    "                     [--ollama-url URL] [--cache-dir DIR] --out <responses.jsonl> [--timeout SECONDS]"
+  )
+  print(
+    "  manifold-eval mteb   --dataset <path-or-fixture> [--ollama-model nomic-embed-text] [--out PATH]"
+  )
+  print("  manifold-eval regress --backend ollama|llama --baseline-model M --redriven-model M")
+  print(
+    "                     --prompt-file P --expected REF [--scorer contains|exact] [--ignore-case]")
+  print("                     [--threshold D] [--seed N] [--max-tokens N] [--temperature D]")
+  print(
+    "                     [--llama-runner CMD] [--ollama-url URL] [--core-commit SHA] [--out REGRESSION.md]"
+  )
+  print("  manifold-eval baseline <record.json>... --baseline-path PATH [--update]")
+  print("                     [--score-threshold D] [--max-age-hours N] [--out PATH]")
+  print("  manifold-eval triage --transcript <transcript.json> [--decide genuine|benign]")
+  print(
+    "                     [--bos ID|autoDetect|none] [--cohort sameWeights|sameFamily|cloud] [--out PATH]"
+  )
+  print(
+    "  manifold-eval dismiss --cell <id> --signature <hex> --reason <text> --ttl <seconds> [--ledger PATH]"
+  )
+  print("  manifold-eval dismissals [--ledger PATH] [--prune]")
+  print(
+    "  manifold-eval toolloop --responses <transcripts.jsonl> [--corpus <cases.jsonl>] [--title T] [--out PATH]"
+  )
+  print("  manifold-eval toolloop-generate --ollama-model <tag> --out <transcripts.jsonl>")
+  print("                     [--corpus <cases.jsonl>] [--repeats N] [--ollama-url URL]")
+  print("                     [--max-tool-iterations N] [--timeout SECONDS]")
+  print("  manifold-eval perf-bench --spec <spec.json> [--out PERF-MATRIX.md] [--title T]")
+  exit(2)
 }
 
 switch subcommand {
 case "collate":
-    var files: [URL] = []
-    var outPath: String?
-    var title: String?
+  var files: [URL] = []
+  var outPath: String?
+  var title: String?
 
-    let rest = Array(arguments.dropFirst())
-    var index = 0
-    while index < rest.count {
-        let token = rest[index]
-        switch token {
-        case "--out":
-            index += 1
-            guard index < rest.count else { die("--out requires a path", code: 2) }
-            outPath = rest[index]
-        case "--title":
-            index += 1
-            guard index < rest.count else { die("--title requires a value", code: 2) }
-            title = rest[index]
-        default:
-            // An unrecognized `--flag` is a usage error, not a filename — otherwise
-            // a typo'd flag (e.g. `--titel`) silently becomes a "record file" that
-            // later fails as unreadable with a confusing message.
-            if token.hasPrefix("--") {
-                die("unknown flag '\(token)'", code: 2)
-            }
-            files.append(URL(fileURLWithPath: token))
-        }
-        index += 1
+  let rest = Array(arguments.dropFirst())
+  var index = 0
+  while index < rest.count {
+    let token = rest[index]
+    switch token {
+    case "--out":
+      index += 1
+      guard index < rest.count else { die("--out requires a path", code: 2) }
+      outPath = rest[index]
+    case "--title":
+      index += 1
+      guard index < rest.count else { die("--title requires a value", code: 2) }
+      title = rest[index]
+    default:
+      // An unrecognized `--flag` is a usage error, not a filename — otherwise
+      // a typo'd flag (e.g. `--titel`) silently becomes a "record file" that
+      // later fails as unreadable with a confusing message.
+      if token.hasPrefix("--") {
+        die("unknown flag '\(token)'", code: 2)
+      }
+      files.append(URL(fileURLWithPath: token))
     }
+    index += 1
+  }
 
-    // Insufficient arguments is a usage error (exit 2), consistent with the
-    // no-subcommand case — not a runtime error (exit 1).
-    guard !files.isEmpty else {
-        die("collate requires at least one record file", code: 2)
-    }
+  // Insufficient arguments is a usage error (exit 2), consistent with the
+  // no-subcommand case — not a runtime error (exit 1).
+  guard !files.isEmpty else {
+    die("collate requires at least one record file", code: 2)
+  }
 
-    let result: CollationResult
+  let result: CollationResult
+  do {
+    result = try Collator.collate(files: files)
+  } catch {
+    die("\(error)", code: 1)
+  }
+
+  // Diagnostics go to stderr so they're visible even when --out captures stdout.
+  for diagnostic in result.diagnostics {
+    warn("[\(diagnostic.severity.rawValue)] \(diagnostic.message)")
+  }
+
+  let markdown = CrossRuntimeMatrix.render(result, title: title ?? CrossRuntimeMatrix.defaultTitle)
+
+  if let outPath {
     do {
-        result = try Collator.collate(files: files)
+      try markdown.write(toFile: outPath, atomically: true, encoding: .utf8)
     } catch {
-        die("\(error)", code: 1)
+      die("writing \(outPath): \(error)", code: 1)
     }
+    print(
+      "wrote \(outPath)  (\(result.records.count) records; backends: \(result.backends.joined(separator: ", ")))"
+    )
+  } else {
+    print(markdown)
+  }
 
-    // Diagnostics go to stderr so they're visible even when --out captures stdout.
-    for diagnostic in result.diagnostics {
-        warn("[\(diagnostic.severity.rawValue)] \(diagnostic.message)")
-    }
-
-    let markdown = CrossRuntimeMatrix.render(result, title: title ?? CrossRuntimeMatrix.defaultTitle)
-
-    if let outPath {
-        do {
-            try markdown.write(toFile: outPath, atomically: true, encoding: .utf8)
-        } catch {
-            die("writing \(outPath): \(error)", code: 1)
-        }
-        print("wrote \(outPath)  (\(result.records.count) records; backends: \(result.backends.joined(separator: ", ")))")
-    } else {
-        print(markdown)
-    }
-
-    // Non-zero only on an error-severity diagnostic (e.g. empty corpus). Warnings
-    // — mixed core commits, tooling drift — render and exit 0; they're advisory.
-    exit(result.hasErrors ? 1 : 0)
+  // Non-zero only on an error-severity diagnostic (e.g. empty corpus). Warnings
+  // — mixed core commits, tooling drift — render and exit 0; they're advisory.
+  exit(result.hasErrors ? 1 : 0)
 
 case "diff":
-    // Top-level `await` is permitted in main.swift (implicit async main). The diff
-    // orchestration lives in DiffCommand to keep this dispatch readable.
-    await DiffCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+  // Top-level `await` is permitted in main.swift (implicit async main). The diff
+  // orchestration lives in DiffCommand to keep this dispatch readable.
+  await DiffCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
 case "ifeval":
-    IFEvalCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+  IFEvalCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
 case "ifeval-generate":
-    await IFEvalGenerateCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+  await IFEvalGenerateCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
 case "bfcl":
-    await BFCLCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+  await BFCLCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
 case "bfcl-generate":
-    // Drives a live Ollama model over the BFCL corpus and writes the
-    // BFCLResponseEntry JSONL that `bfcl` scores — the full-corpus generator
-    // `bfcl`/`cliRun` never had. See BFCLGenerateCommand.
-    await BFCLGenerateCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+  // Drives a live Ollama model over the BFCL corpus and writes the
+  // BFCLResponseEntry JSONL that `bfcl` scores — the full-corpus generator
+  // `bfcl`/`cliRun` never had. See BFCLGenerateCommand.
+  await BFCLGenerateCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
 case "mteb":
-    await MTEBCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+  await MTEBCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
 case "regress":
-    // The replay-regression moat entry point (plan §8). Orchestration lives in
-    // RegressCommand; the gate/runner/report it drives live in ManifoldEval/Replay.
-    await RegressCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+  // The replay-regression moat entry point (plan §8). Orchestration lives in
+  // RegressCommand; the gate/runner/report it drives live in ManifoldEval/Replay.
+  await RegressCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
 case "baseline":
-    // The rot-guard entry point (issue #22): diffs a run's ConformanceRecords
-    // against a persisted per-cell baseline, or writes one with --update.
-    BaselineCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+  // The rot-guard entry point (issue #22): diffs a run's ConformanceRecords
+  // against a persisted per-cell baseline, or writes one with --update.
+  BaselineCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
 case "triage":
-    // Pre-triage assistant (#23): proposes a brief for a flagged cell, never
-    // adjudicates. Orchestration lives in TriageCommand; the brief type and
-    // classification reuse live in ManifoldEval/Differential/TriageBrief.swift.
-    TriageCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+  // Pre-triage assistant (#23): proposes a brief for a flagged cell, never
+  // adjudicates. Orchestration lives in TriageCommand; the brief type and
+  // classification reuse live in ManifoldEval/Differential/TriageBrief.swift.
+  TriageCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
 case "dismiss":
-    // Records a confirmed by-design divergence dismissal (issue #25) — suppresses
-    // re-triage of a settled cell+signature until its TTL expires. Isolated block:
-    // the sibling triage command that PRODUCES flagged findings is out of scope
-    // here; DismissalsLedger's filter API is generic over cell+signature strings.
-    DismissalsCommand.runDismiss(Array(arguments.dropFirst()), die: die, warn: warn)
+  // Records a confirmed by-design divergence dismissal (issue #25) — suppresses
+  // re-triage of a settled cell+signature until its TTL expires. Isolated block:
+  // the sibling triage command that PRODUCES flagged findings is out of scope
+  // here; DismissalsLedger's filter API is generic over cell+signature strings.
+  DismissalsCommand.runDismiss(Array(arguments.dropFirst()), die: die, warn: warn)
 
 case "dismissals":
-    DismissalsCommand.runDismissals(Array(arguments.dropFirst()), die: die, warn: warn)
+  DismissalsCommand.runDismissals(Array(arguments.dropFirst()), die: die, warn: warn)
 
 case "toolloop":
-    // Multi-turn tool-loop conformance scorer (issue #27): offline, scores
-    // pre-recorded episode transcripts against the corpus. Threading logic
-    // lives in ManifoldEval/ToolLoop.
-    ToolLoopCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+  // Multi-turn tool-loop conformance scorer (issue #27): offline, scores
+  // pre-recorded episode transcripts against the corpus. Threading logic
+  // lives in ManifoldEval/ToolLoop.
+  ToolLoopCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
 case "toolloop-generate":
-    // The lane's LIVE consumer: drives Ollama through the real ToolRegistry
-    // dispatch loop (scripted deterministic tools) and records the episode
-    // transcripts `toolloop` scores.
-    await ToolLoopGenerateCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+  // The lane's LIVE consumer: drives Ollama through the real ToolRegistry
+  // dispatch loop (scripted deterministic tools) and records the episode
+  // transcripts `toolloop` scores.
+  await ToolLoopGenerateCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
 case "perf-bench":
-    // The perf-harness spine (spec-driven HTTP-driver lanes → collate → render).
-    // Orchestration lives in PerfBenchCommand; the record/collator/report types
-    // live in ManifoldEval/Perf.
-    await PerfBenchCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
+  // The perf-harness spine (spec-driven HTTP-driver lanes → collate → render).
+  // Orchestration lives in PerfBenchCommand; the record/collator/report types
+  // live in ManifoldEval/Perf.
+  await PerfBenchCommand.run(Array(arguments.dropFirst()), die: die, warn: warn)
 
 default:
-    die(
-        "unknown subcommand '\(subcommand)' (expected: collate, diff, ifeval, ifeval-generate, bfcl, "
-            + "bfcl-generate, mteb, regress, baseline, triage, dismiss, dismissals, toolloop, "
-            + "toolloop-generate, perf-bench)",
-        code: 2
-    )
+  die(
+    "unknown subcommand '\(subcommand)' (expected: collate, diff, ifeval, ifeval-generate, bfcl, "
+      + "bfcl-generate, mteb, regress, baseline, triage, dismiss, dismissals, toolloop, "
+      + "toolloop-generate, perf-bench)",
+    code: 2
+  )
 }

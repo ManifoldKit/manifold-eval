@@ -12,118 +12,119 @@ import ManifoldInference
 /// so it can be used in the shared eval surface.
 public struct IFEvalLane: Sendable {
 
-    // MARK: - Verifier registry
+  // MARK: - Verifier registry
 
-    /// All verifiers keyed by instruction ID.
-    private let verifiers: [String: any IFEvalVerifier]
+  /// All verifiers keyed by instruction ID.
+  private let verifiers: [String: any IFEvalVerifier]
 
-    public init() {
-        var map: [String: any IFEvalVerifier] = [:]
-        let all: [any IFEvalVerifier] = [
-            // Length
-            WordCountVerifier(),
-            SentenceCountVerifier(),
-            ParagraphCountVerifier(),
-            NthParagraphFirstWordVerifier(),
-            // Keywords
-            KeywordInclusionVerifier(),
-            KeywordExclusionVerifier(),
-            KeywordFrequencyVerifier(),
-            LetterFrequencyVerifier(),
-            // Format
-            JSONOutputVerifier(),
-            BulletListVerifier(),
-            HighlightedSectionsVerifier(),
-            TitleVerifier(),
-            SectionSeparatorVerifier(),
-            PlaceholderCountVerifier(),
-            PostscriptVerifier(),
-            ConstrainedResponseVerifier(),
-            TwoResponsesVerifier(),
-            RepeatPromptVerifier(),
-            // Case
-            AllLowercaseVerifier(),
-            AllUppercaseVerifier(),
-            CapitalWordFrequencyVerifier(),
-            // Start/end/punctuation
-            StartsWithVerifier(),
-            EndsWithVerifier(),
-            NoCommaVerifier(),
-            QuotedWrapVerifier(),
-            // Language
-            ResponseLanguageVerifier(),
-        ]
-        for v in all {
-            map[v.instructionID] = v
-        }
-        verifiers = map
+  public init() {
+    var map: [String: any IFEvalVerifier] = [:]
+    let all: [any IFEvalVerifier] = [
+      // Length
+      WordCountVerifier(),
+      SentenceCountVerifier(),
+      ParagraphCountVerifier(),
+      NthParagraphFirstWordVerifier(),
+      // Keywords
+      KeywordInclusionVerifier(),
+      KeywordExclusionVerifier(),
+      KeywordFrequencyVerifier(),
+      LetterFrequencyVerifier(),
+      // Format
+      JSONOutputVerifier(),
+      BulletListVerifier(),
+      HighlightedSectionsVerifier(),
+      TitleVerifier(),
+      SectionSeparatorVerifier(),
+      PlaceholderCountVerifier(),
+      PostscriptVerifier(),
+      ConstrainedResponseVerifier(),
+      TwoResponsesVerifier(),
+      RepeatPromptVerifier(),
+      // Case
+      AllLowercaseVerifier(),
+      AllUppercaseVerifier(),
+      CapitalWordFrequencyVerifier(),
+      // Start/end/punctuation
+      StartsWithVerifier(),
+      EndsWithVerifier(),
+      NoCommaVerifier(),
+      QuotedWrapVerifier(),
+      // Language
+      ResponseLanguageVerifier(),
+    ]
+    for v in all {
+      map[v.instructionID] = v
+    }
+    verifiers = map
+  }
+
+  // MARK: - Per-case evaluation
+
+  /// Evaluates `response` against all constraints in `evalCase`.
+  ///
+  /// Returns a result with one Boolean per instruction. An instruction whose
+  /// ID has no registered verifier is recorded as `false` (conservative: an
+  /// unverifiable constraint is not considered satisfied).
+  public func evaluate(case evalCase: IFEvalCase, response: String) -> IFEvalResult {
+    let results = zip(evalCase.instructionIDs, evalCase.kwargs).map { id, kw in
+      verifiers[id]?.verify(response: response, kwargs: kw) ?? false
+    }
+    return IFEvalResult(
+      key: evalCase.key,
+      prompt: evalCase.prompt,
+      response: response,
+      instructionResults: Array(results)
+    )
+  }
+
+  // MARK: - Aggregation
+
+  /// Computes strict accuracy and per-instruction accuracy over a batch of results.
+  public func aggregate(results: [IFEvalResult], cases: [IFEvalCase]) -> IFEvalAggregateScore {
+    guard !results.isEmpty else {
+      return IFEvalAggregateScore(
+        strictAccuracy: 0,
+        totalCases: 0,
+        passedCases: 0,
+        perInstructionAccuracy: [:]
+      )
     }
 
-    // MARK: - Per-case evaluation
+    let passedCases = results.filter(\.allPassed).count
+    let strictAccuracy = Double(passedCases) / Double(results.count)
 
-    /// Evaluates `response` against all constraints in `evalCase`.
-    ///
-    /// Returns a result with one Boolean per instruction. An instruction whose
-    /// ID has no registered verifier is recorded as `false` (conservative: an
-    /// unverifiable constraint is not considered satisfied).
-    public func evaluate(case evalCase: IFEvalCase, response: String) -> IFEvalResult {
-        let results = zip(evalCase.instructionIDs, evalCase.kwargs).map { id, kw in
-            verifiers[id]?.verify(response: response, kwargs: kw) ?? false
+    // Build per-instruction-ID pass counts.
+    var passCount: [String: Int] = [:]
+    var totalCount: [String: Int] = [:]
+
+    // Build a key→case lookup to access instructionIDs in parallel with results.
+    let casesByKey: [String: IFEvalCase] = Dictionary(
+      cases.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
+
+    for result in results {
+      guard let evalCase = casesByKey[result.key] else { continue }
+      for (idx, id) in evalCase.instructionIDs.enumerated() {
+        totalCount[id, default: 0] += 1
+        if idx < result.instructionResults.count, result.instructionResults[idx] {
+          passCount[id, default: 0] += 1
         }
-        return IFEvalResult(
-            key: evalCase.key,
-            prompt: evalCase.prompt,
-            response: response,
-            instructionResults: Array(results)
-        )
+      }
     }
 
-    // MARK: - Aggregation
-
-    /// Computes strict accuracy and per-instruction accuracy over a batch of results.
-    public func aggregate(results: [IFEvalResult], cases: [IFEvalCase]) -> IFEvalAggregateScore {
-        guard !results.isEmpty else {
-            return IFEvalAggregateScore(
-                strictAccuracy: 0,
-                totalCases: 0,
-                passedCases: 0,
-                perInstructionAccuracy: [:]
-            )
-        }
-
-        let passedCases = results.filter(\.allPassed).count
-        let strictAccuracy = Double(passedCases) / Double(results.count)
-
-        // Build per-instruction-ID pass counts.
-        var passCount: [String: Int] = [:]
-        var totalCount: [String: Int] = [:]
-
-        // Build a key→case lookup to access instructionIDs in parallel with results.
-        let casesByKey: [String: IFEvalCase] = Dictionary(cases.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
-
-        for result in results {
-            guard let evalCase = casesByKey[result.key] else { continue }
-            for (idx, id) in evalCase.instructionIDs.enumerated() {
-                totalCount[id, default: 0] += 1
-                if idx < result.instructionResults.count, result.instructionResults[idx] {
-                    passCount[id, default: 0] += 1
-                }
-            }
-        }
-
-        var perInstructionAccuracy: [String: Double] = [:]
-        for (id, total) in totalCount {
-            let passed = passCount[id] ?? 0
-            perInstructionAccuracy[id] = total > 0 ? Double(passed) / Double(total) : 0
-        }
-
-        return IFEvalAggregateScore(
-            strictAccuracy: strictAccuracy,
-            totalCases: results.count,
-            passedCases: passedCases,
-            perInstructionAccuracy: perInstructionAccuracy
-        )
+    var perInstructionAccuracy: [String: Double] = [:]
+    for (id, total) in totalCount {
+      let passed = passCount[id] ?? 0
+      perInstructionAccuracy[id] = total > 0 ? Double(passed) / Double(total) : 0
     }
+
+    return IFEvalAggregateScore(
+      strictAccuracy: strictAccuracy,
+      totalCases: results.count,
+      passedCases: passedCases,
+      perInstructionAccuracy: perInstructionAccuracy
+    )
+  }
 }
 
 // MARK: - EvalScorer conformance
@@ -136,23 +137,24 @@ public struct IFEvalLane: Sendable {
 /// `EvalScore` carries `.bool(allPassed)` as the strict-accuracy verdict and
 /// encodes per-instruction results in `metadata`.
 extension IFEvalLane: EvalScorer {
-    public typealias Expected = IFEvalCase
+  public typealias Expected = IFEvalCase
 
-    public func score(output: EvalRunOutput, expected: IFEvalCase) async -> EvalScore {
-        let result = evaluate(case: expected, response: output.visibleText)
-        var metadata: [String: String] = [:]
-        for (id, passed) in zip(expected.instructionIDs, result.instructionResults) {
-            metadata[id] = passed ? "pass" : "fail"
-        }
-        let explanation = result.allPassed
-            ? "All \(result.instructionResults.count) instructions passed."
-            : "Failed: \(zip(expected.instructionIDs, result.instructionResults).filter { !$0.1 }.map(\.0).joined(separator: ", "))"
-
-        return EvalScore(
-            value: .bool(result.allPassed),
-            answer: nil,
-            explanation: explanation,
-            metadata: metadata
-        )
+  public func score(output: EvalRunOutput, expected: IFEvalCase) async -> EvalScore {
+    let result = evaluate(case: expected, response: output.visibleText)
+    var metadata: [String: String] = [:]
+    for (id, passed) in zip(expected.instructionIDs, result.instructionResults) {
+      metadata[id] = passed ? "pass" : "fail"
     }
+    let explanation =
+      result.allPassed
+      ? "All \(result.instructionResults.count) instructions passed."
+      : "Failed: \(zip(expected.instructionIDs, result.instructionResults).filter { !$0.1 }.map(\.0).joined(separator: ", "))"
+
+    return EvalScore(
+      value: .bool(result.allPassed),
+      answer: nil,
+      explanation: explanation,
+      metadata: metadata
+    )
+  }
 }

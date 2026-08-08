@@ -8,15 +8,15 @@ import Foundation
 /// instruction, but `startend:end_checker` and `startend:quotation` share this
 /// pattern.
 public struct StartsWithVerifier: IFEvalVerifier {
-    public let instructionID = "startend:start_checker"
+  public let instructionID = "startend:start_checker"
 
-    public init() {}
+  public init() {}
 
-    public func verify(response: String, kwargs: [String: IFEvalKwarg]) -> Bool {
-        guard let phrase = kwargs["start_phrase"]?.stringValue else { return false }
-        let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.lowercased().hasPrefix(phrase.lowercased())
-    }
+  public func verify(response: String, kwargs: [String: IFEvalKwarg]) -> Bool {
+    guard let phrase = kwargs["start_phrase"]?.stringValue else { return false }
+    let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.lowercased().hasPrefix(phrase.lowercased())
+  }
 }
 
 // MARK: - Ends with
@@ -26,15 +26,15 @@ public struct StartsWithVerifier: IFEvalVerifier {
 /// The response must end with `end_phrase` (case-insensitive, trailing
 /// whitespace stripped).
 public struct EndsWithVerifier: IFEvalVerifier {
-    public let instructionID = "startend:end_checker"
+  public let instructionID = "startend:end_checker"
 
-    public init() {}
+  public init() {}
 
-    public func verify(response: String, kwargs: [String: IFEvalKwarg]) -> Bool {
-        guard let phrase = kwargs["end_phrase"]?.stringValue else { return false }
-        let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.lowercased().hasSuffix(phrase.lowercased())
-    }
+  public func verify(response: String, kwargs: [String: IFEvalKwarg]) -> Bool {
+    guard let phrase = kwargs["end_phrase"]?.stringValue else { return false }
+    let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.lowercased().hasSuffix(phrase.lowercased())
+  }
 }
 
 // MARK: - No comma
@@ -43,13 +43,13 @@ public struct EndsWithVerifier: IFEvalVerifier {
 ///
 /// The response must contain no comma characters (`,`).
 public struct NoCommaVerifier: IFEvalVerifier {
-    public let instructionID = "punctuation:no_comma"
+  public let instructionID = "punctuation:no_comma"
 
-    public init() {}
+  public init() {}
 
-    public func verify(response: String, kwargs: [String: IFEvalKwarg]) -> Bool {
-        !response.contains(",")
-    }
+  public func verify(response: String, kwargs: [String: IFEvalKwarg]) -> Bool {
+    !response.contains(",")
+  }
 }
 
 // MARK: - Quoted wrap
@@ -59,12 +59,12 @@ public struct NoCommaVerifier: IFEvalVerifier {
 /// The entire response must be wrapped in double quote characters: it must
 /// start with `"` and end with `"` (after stripping surrounding whitespace).
 public struct QuotedWrapVerifier: IFEvalVerifier {
-    public let instructionID = "startend:quotation"
+  public let instructionID = "startend:quotation"
 
-    public init() {}
+  public init() {}
 
-    public func verify(response: String, kwargs: [String: IFEvalKwarg]) -> Bool {
-        let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.hasPrefix("\"") && trimmed.hasSuffix("\"") && trimmed.count >= 2
-    }
+  public func verify(response: String, kwargs: [String: IFEvalKwarg]) -> Bool {
+    let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.hasPrefix("\"") && trimmed.hasSuffix("\"") && trimmed.count >= 2
+  }
 }
