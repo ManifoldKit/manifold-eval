@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/ManifoldKit/manifold-eval/compare/v0.1.4...v0.1.5) (2026-08-08)
+
+
+### Features
+
+* **ci:** supply-chain posture — permissions, CodeQL, dependency review ([#67](https://github.com/ManifoldKit/manifold-eval/issues/67)) ([cb3d1b0](https://github.com/ManifoldKit/manifold-eval/commit/cb3d1b059cfad7bc143442c2ed9c1038ae804bf0))
+
 ## [0.1.4](https://github.com/ManifoldKit/manifold-eval/compare/v0.1.3...v0.1.4) (2026-07-29)
 
 
