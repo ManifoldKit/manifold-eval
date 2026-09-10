@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.6](https://github.com/ManifoldKit/manifold-eval/compare/v0.1.5...v0.1.6) (2026-09-10)
+
+
+### Highlights
+
+**Run the assurance harness against ManifoldKit 0.78.0.** This requested
+compatibility release packages the exact core pin already merged on main.
+It adds no eval lanes, scoring changes, or new model-quality claims; fixture
+tests verify the harness contracts, not live model behavior.
+
+### Dependencies
+
+- Pin ManifoldKit to exactly 0.78.0, including the published revision in
+  Package.resolved ([#75](https://github.com/ManifoldKit/manifold-eval/pull/75)).
+- Include the CodeQL action updates merged since 0.1.5
+  ([#71](https://github.com/ManifoldKit/manifold-eval/pull/71),
+  [#73](https://github.com/ManifoldKit/manifold-eval/pull/73)).
+
 ## [0.1.5](https://github.com/ManifoldKit/manifold-eval/compare/v0.1.4...v0.1.5) (2026-08-08)
 
 
