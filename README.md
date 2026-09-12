@@ -492,6 +492,10 @@ OMLX's `Authorization: Bearer <key>`) — specs are checked into the repo and ne
 value directly. `--json-out` writes the raw per-lane `BenchResult` array (pretty JSON, sorted keys)
 for publication under a consumer repo's `docs/perf/`.
 
+Benchmark endpoints outside the local machine must use HTTPS. Plain HTTP is accepted only for the
+exact loopback identities `localhost`, `127.0.0.0/8`, and `::1`; lookalike hostnames are rejected.
+Redirects cannot downgrade HTTPS to HTTP, and cross-origin redirects have credential headers removed.
+
 **Before you run it against real hardware, write down your prediction** for the TTFT/TPS delta you
 expect. A number that only confirms what you already assumed teaches you nothing about whether the
 harness — or the engine — is actually behaving as understood.

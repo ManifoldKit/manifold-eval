@@ -63,4 +63,4 @@ permissions:
 
 jobs:
   build-test:
-    uses: ManifoldKit/.github/.github/workflows/swift-ci.yml@main
+    uses: ManifoldKit/.github/.github/workflows/swift-ci.yml@ad62782801a0b817a5e269a812577826ea7f240e

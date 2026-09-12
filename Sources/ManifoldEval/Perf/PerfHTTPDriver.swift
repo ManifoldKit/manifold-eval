@@ -1,5 +1,11 @@
 import Foundation
 
+#if canImport(Darwin)
+  import Darwin
+#else
+  import Glibc
+#endif
+
 /// Failures from driving a lane's HTTP endpoint.
 public enum PerfDriverError: Error, CustomStringConvertible, Equatable {
   case invalidEndpoint(String)
@@ -111,6 +117,7 @@ public struct PerfHTTPDriver: Sendable {
     protocolConfig: BenchSpec.GenerationProtocol,
     keepAliveSeconds: Int? = nil
   ) async throws -> SingleRunMeasurement {
+    _ = try PerfEndpointPolicy.validatedBaseURL(lane.endpoint)
     switch lane.transport {
     case .httpOpenAI:
       return try await runOpenAI(lane: lane, protocolConfig: protocolConfig)
@@ -153,9 +160,7 @@ public struct PerfHTTPDriver: Sendable {
   private func runOpenAI(lane: BenchSpec.Lane, protocolConfig: BenchSpec.GenerationProtocol)
     async throws -> SingleRunMeasurement
   {
-    guard let base = URL(string: lane.endpoint) else {
-      throw PerfDriverError.invalidEndpoint(lane.endpoint)
-    }
+    let base = try PerfEndpointPolicy.validatedBaseURL(lane.endpoint)
     let url = base.appendingPathComponent("v1/chat/completions")
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
@@ -185,7 +190,10 @@ public struct PerfHTTPDriver: Sendable {
 
     let (bytes, response): (URLSession.AsyncBytes, URLResponse)
     do {
-      (bytes, response) = try await session.bytes(for: request)
+      (bytes, response) = try await session.bytes(
+        for: request,
+        delegate: PerfRedirectGuard()
+      )
     } catch {
       throw PerfDriverError.requestFailed(reason: "\(error)")
     }
@@ -245,9 +253,7 @@ public struct PerfHTTPDriver: Sendable {
     protocolConfig: BenchSpec.GenerationProtocol,
     keepAliveSeconds: Int?
   ) async throws -> SingleRunMeasurement {
-    guard let base = URL(string: lane.endpoint) else {
-      throw PerfDriverError.invalidEndpoint(lane.endpoint)
-    }
+    let base = try PerfEndpointPolicy.validatedBaseURL(lane.endpoint)
     let url = base.appendingPathComponent("api/generate")
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
@@ -276,7 +282,10 @@ public struct PerfHTTPDriver: Sendable {
 
     let (bytes, response): (URLSession.AsyncBytes, URLResponse)
     do {
-      (bytes, response) = try await session.bytes(for: request)
+      (bytes, response) = try await session.bytes(
+        for: request,
+        delegate: PerfRedirectGuard()
+      )
     } catch {
       throw PerfDriverError.requestFailed(reason: "\(error)")
     }
@@ -347,6 +356,11 @@ public struct PerfHTTPDriver: Sendable {
   /// `nil` fields rather than aborting the bench run, since provenance is
   /// descriptive metadata, not a load-bearing measurement.
   public func fetchProvenance(lane: BenchSpec.Lane) async -> LaneProvenance {
+    do {
+      _ = try PerfEndpointPolicy.validatedBaseURL(lane.endpoint)
+    } catch {
+      return LaneProvenance(engineVersion: nil, modelDigest: nil)
+    }
     switch lane.transport {
     case .httpOllama:
       async let version = fetchOllamaVersion(lane: lane)
@@ -363,11 +377,19 @@ public struct PerfHTTPDriver: Sendable {
   }
 
   private func fetchOllamaVersion(lane: BenchSpec.Lane) async -> String? {
-    guard let base = URL(string: lane.endpoint) else { return nil }
+    let base: URL
+    do {
+      base = try PerfEndpointPolicy.validatedBaseURL(lane.endpoint)
+    } catch {
+      return nil
+    }
     let url = base.appendingPathComponent("api/version")
     struct VersionResponse: Decodable { let version: String }
     do {
-      let (data, response) = try await session.data(from: url)
+      let (data, response) = try await session.data(
+        for: URLRequest(url: url),
+        delegate: PerfRedirectGuard()
+      )
       guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
         return nil
       }
@@ -378,7 +400,12 @@ public struct PerfHTTPDriver: Sendable {
   }
 
   private func fetchOllamaModelDigest(lane: BenchSpec.Lane) async -> String? {
-    guard let base = URL(string: lane.endpoint) else { return nil }
+    let base: URL
+    do {
+      base = try PerfEndpointPolicy.validatedBaseURL(lane.endpoint)
+    } catch {
+      return nil
+    }
     let url = base.appendingPathComponent("api/tags")
     struct TagsResponse: Decodable {
       struct ModelEntry: Decodable {
@@ -388,7 +415,10 @@ public struct PerfHTTPDriver: Sendable {
       let models: [ModelEntry]
     }
     do {
-      let (data, response) = try await session.data(from: url)
+      let (data, response) = try await session.data(
+        for: URLRequest(url: url),
+        delegate: PerfRedirectGuard()
+      )
       guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
         return nil
       }
@@ -510,6 +540,111 @@ public struct PerfHTTPDriver: Sendable {
       case promptEvalDuration = "prompt_eval_duration"
       case loadDuration = "load_duration"
       case totalDuration = "total_duration"
+    }
+  }
+}
+
+enum PerfEndpointPolicy {
+  static func validatedBaseURL(_ endpoint: String) throws -> URL {
+    guard let url = URL(string: endpoint),
+      let scheme = url.scheme?.lowercased(),
+      scheme == "http" || scheme == "https",
+      let host = url.host,
+      !host.isEmpty
+    else {
+      throw PerfDriverError.invalidEndpoint(endpoint)
+    }
+    if scheme == "http" && !isLoopbackHost(host) {
+      throw PerfDriverError.invalidEndpoint(
+        "\(endpoint) (plaintext HTTP is allowed only for loopback endpoints)"
+      )
+    }
+    return url
+  }
+
+  static func isLoopbackHost(_ rawHost: String) -> Bool {
+    let host =
+      rawHost.lowercased().hasSuffix(".")
+      ? String(rawHost.lowercased().dropLast())
+      : rawHost.lowercased()
+    if host == "localhost" { return true }
+
+    var ipv4 = in_addr()
+    if host.withCString({ inet_pton(AF_INET, $0, &ipv4) }) == 1 {
+      return (UInt32(bigEndian: ipv4.s_addr) & 0xff00_0000) == 0x7f00_0000
+    }
+
+    var ipv6 = in6_addr()
+    if host.withCString({ inet_pton(AF_INET6, $0, &ipv6) }) == 1 {
+      return withUnsafeBytes(of: &ipv6) { bytes in
+        bytes.dropLast().allSatisfy { $0 == 0 } && bytes.last == 1
+      }
+    }
+    return false
+  }
+}
+
+final class PerfRedirectGuard: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+  func urlSession(
+    _ session: URLSession,
+    task: URLSessionTask,
+    willPerformHTTPRedirection response: HTTPURLResponse,
+    newRequest request: URLRequest,
+    completionHandler: @escaping (URLRequest?) -> Void
+  ) {
+    completionHandler(
+      Self.redirectedRequest(
+        originalURL: task.originalRequest?.url,
+        currentURL: response.url,
+        request: request
+      ))
+  }
+
+  static func redirectedRequest(
+    originalURL: URL?,
+    currentURL: URL?,
+    request: URLRequest
+  ) -> URLRequest? {
+    guard let originalURL, let currentURL, let targetURL = request.url else { return nil }
+    let targetScheme = targetURL.scheme?.lowercased()
+    if (originalURL.scheme?.lowercased() == "https"
+      || currentURL.scheme?.lowercased() == "https") && targetScheme != "https"
+    {
+      return nil
+    }
+    do {
+      _ = try PerfEndpointPolicy.validatedBaseURL(targetURL.absoluteString)
+    } catch {
+      return nil
+    }
+    let crossesCurrentOrigin = !sameOrigin(currentURL, targetURL)
+    let crossesOriginalOrigin = !sameOrigin(originalURL, targetURL)
+    guard crossesCurrentOrigin || crossesOriginalOrigin else { return request }
+
+    var stripped = request
+    for name in stripped.allHTTPHeaderFields?.keys.map({ $0 }) ?? [] {
+      let lower = name.lowercased()
+      if lower == "authorization" || lower == "cookie" || lower == "proxy-authorization"
+        || lower.hasPrefix("x-api-")
+      {
+        stripped.setValue(nil, forHTTPHeaderField: name)
+      }
+    }
+    return stripped
+  }
+
+  private static func sameOrigin(_ lhs: URL, _ rhs: URL) -> Bool {
+    lhs.scheme?.lowercased() == rhs.scheme?.lowercased()
+      && lhs.host?.lowercased() == rhs.host?.lowercased()
+      && effectivePort(lhs) == effectivePort(rhs)
+  }
+
+  private static func effectivePort(_ url: URL) -> Int? {
+    if let port = url.port { return port }
+    switch url.scheme?.lowercased() {
+    case "http": return 80
+    case "https": return 443
+    default: return nil
     }
   }
 }
