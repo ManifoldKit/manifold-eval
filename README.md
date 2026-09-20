@@ -1,5 +1,7 @@
 # manifold-eval
 
+Requires macOS 26 or later for the ManifoldKit 0.79 release train.
+
 Independent **assurance** harness for the [ManifoldKit](https://github.com/ManifoldKit/ManifoldKit)
 family. Where ManifoldKit (and the `manifold-mlx` / `manifold-llama` companions) optimize for
 *developer utility*, this repo optimizes for *assurance*: reproducible, deterministic, adversarial
