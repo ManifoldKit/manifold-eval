@@ -94,6 +94,41 @@ final class ToolLoopGenerateTests: XCTestCase {
     XCTAssertEqual(result.entries[1].finalText, "ok")
   }
 
+  /// An all-error live generation must fail the health check with on-wire
+  /// detail, rather than looking green because it still produced entries.
+  func testLiveGuardRejectsAllErroredGeneration() {
+    let erroredEntry = ToolLoopTranscriptEntry(
+      id: "thread_gate_1", repeatIndex: 0, events: [], finalText: "",
+      error: "episode timed out after 120s"
+    )
+    let result = ToolLoopLane.GenerateResult(entries: [erroredEntry], errored: 1)
+
+    let failure = ToolLoopGenerateLiveTests.generationHealthFailure(for: result)
+
+    XCTAssertTrue(
+      ToolLoopGenerateLiveTests.measuredEntries(for: result).isEmpty,
+      "all errored episodes are unmeasured holes, not a zero-call sample"
+    )
+    XCTAssertEqual(
+      failure,
+      "live tool-loop generation had 1 errored episode(s); "
+        + "these are unmeasured infrastructure failures, not capability zeros. "
+        + "thread_gate_1#0: episode timed out after 120s"
+    )
+  }
+
+  /// No structured calls is a legitimate measured capability zero, not an
+  /// infrastructure error, so the live generation health check stays clean.
+  func testLiveGuardAllowsCleanGenerationWithNoStructuredCalls() {
+    let noCallEntry = ToolLoopTranscriptEntry(
+      id: "thread_gate_1", repeatIndex: 0, events: [], finalText: "I cannot call tools."
+    )
+    let result = ToolLoopLane.GenerateResult(entries: [noCallEntry], errored: 0)
+
+    XCTAssertNil(ToolLoopGenerateLiveTests.generationHealthFailure(for: result))
+    XCTAssertEqual(ToolLoopGenerateLiveTests.measuredEntries(for: result), [noCallEntry])
+  }
+
   /// The scorer must exclude error-marked entries from measurement: an
   /// infrastructure failure is a hole, never a capability zero.
   func testErroredEntriesAreHolesNotMeasuredMisses() {
