@@ -66,6 +66,14 @@ final class ToolLoopGenerateLiveTests: XCTestCase {
 
     XCTAssertEqual(result.entries.count, cases.count, "one episode per case")
 
+    // An errored episode is an infrastructure hole, not a measured capability
+    // zero (CONCEPTS: absence != failure). This smoke test is specifically a
+    // live-consumer health check, so fail closed rather than letting a run
+    // whose episodes all failed look green merely because it produced one
+    // entry per case. Keep the entry-level diagnostics in the failure: the
+    // caller needs the actual timeout/backend error to repair the setup.
+    XCTAssertNil(Self.generationHealthFailure(for: result))
+
     // Wiring proof, separated from model capability (assess, don't
     // declare): a model that emits NO structured tool calls at all is a
     // legitimate measured zero — gemma3-4b-tools does exactly this,
@@ -73,15 +81,21 @@ final class ToolLoopGenerateLiveTests: XCTestCase {
     // tool's result — and must not read as a harness failure. What IS a
     // harness failure is a structured call that never produced a result:
     // the model did its part and the dispatch loop didn't run.
-    let episodesWithCalls = result.entries.filter { !$0.calls.isEmpty }
-    if episodesWithCalls.isEmpty {
+    let measuredEntries = Self.measuredEntries(for: result)
+    if measuredEntries.isEmpty {
+      print(
+        "[ToolLoopGenerateLiveTests] \(modelName): no clean episodes were measured; "
+          + "\(result.errored) episode(s) errored, so this is unmeasured rather than a capability zero"
+      )
+    } else if measuredEntries.allSatisfy({ $0.calls.isEmpty }) {
       print(
         "[ToolLoopGenerateLiveTests] \(modelName): emitted ZERO structured tool calls — "
           + "a measured capability zero for this cell, not a wiring failure"
       )
     } else {
-      let episodesWithDispatch = episodesWithCalls.filter { entry in
-        entry.events.contains { if case .result = $0 { return true } else { return false } }
+      let episodesWithDispatch = measuredEntries.filter { entry in
+        guard !entry.calls.isEmpty else { return false }
+        return entry.events.contains { if case .result = $0 { return true } else { return false } }
       }
       XCTAssertFalse(
         episodesWithDispatch.isEmpty,
@@ -112,5 +126,33 @@ final class ToolLoopGenerateLiveTests: XCTestCase {
     case .some(.some(false)): return "✗"
     default: return "—"
     }
+  }
+
+  /// Returns the live smoke-test failure for errored episodes, if any.
+  ///
+  /// The scorer still treats error-marked entries as holes. The live test has
+  /// a different concern: whether the generation run itself was healthy
+  /// enough to provide its live-consumer proof. Keeping this decision pure
+  /// lets the hermetic suite prove both its red and measured-zero paths.
+  static func generationHealthFailure(for result: ToolLoopLane.GenerateResult) -> String? {
+    guard result.errored > 0 else { return nil }
+
+    let details = result.entries.compactMap { entry -> String? in
+      guard let error = entry.error else { return nil }
+      return "\(entry.id)#\(entry.repeatIndex): \(error)"
+    }
+    let detailText =
+      details.isEmpty ? "No entry.error details were recorded." : details.joined(separator: "; ")
+    return
+      "live tool-loop generation had \(result.errored) errored episode(s); "
+      + "these are unmeasured infrastructure failures, not capability zeros. "
+      + detailText
+  }
+
+  /// Entries without an on-wire error are the only ones that count as live
+  /// measurement. Error-marked entries are infrastructure holes, even if
+  /// they happen to contain partial events.
+  static func measuredEntries(for result: ToolLoopLane.GenerateResult) -> [ToolLoopTranscriptEntry] {
+    result.entries.filter { $0.error == nil }
   }
 }
