@@ -85,7 +85,7 @@ final class AutomationClaimsTests: XCTestCase {
 
   /// Every workflow whose status this repo documents.
   private static let workflowFiles = [
-    "ci.yml", "rot-guard.yml", "core-bump.yml", "release-please.yml",
+    "ci.yml", "rot-guard.yml", "core-bump.yml", "release-please.yml", "canary.yml",
   ]
 
   /// Top-level trigger keys present in a workflow's `on:` block.
@@ -201,6 +201,15 @@ final class AutomationClaimsTests: XCTestCase {
         """
       )
     }
+  }
+
+  func testCoreMainCanaryUsesReusableWorkflowOnSupportedRunner() throws {
+    let yaml = try read(".github/workflows/canary.yml")
+    XCTAssertTrue(yaml.contains("name: Canary (core main)"))
+    XCTAssertTrue(yaml.contains("uses: ManifoldKit/.github/.github/workflows/companion-canary.yml@7aab2cfd25b44b2abf1b48107ec9f41d6b75c591"))
+    XCTAssertTrue(yaml.contains("runner: macos-26"))
+    XCTAssertTrue(yaml.contains("types: [core-release]"))
+    XCTAssertTrue(try statusDoc().contains("`canary.yml`"))
   }
 
   /// `pull_request` must never carry a path filter.
