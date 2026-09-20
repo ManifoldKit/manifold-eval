@@ -216,6 +216,11 @@ final class AutomationClaimsTests: XCTestCase {
       ["missing pinned reusable canary call", "wrong runner"])
   }
 
+  func testCoreMainCanaryRejectsReleasedCoreRefFixture() throws {
+    let yaml = try read("Tests/ManifoldEvalTests/Fixtures/Canary/released-ref.yml")
+    XCTAssertEqual(coreMainCanaryIssues(in: yaml), ["core-ref is not main"])
+  }
+
   private func coreMainCanaryIssues(in yaml: String) -> [String] {
     var issues: [String] = []
     if !yaml.contains("name: Canary (core main)") {
@@ -229,6 +234,14 @@ final class AutomationClaimsTests: XCTestCase {
     }
     if !yaml.contains("types: [core-release]") {
       issues.append("missing core-release trigger")
+    }
+    for line in yaml.split(separator: "\n") {
+      let trimmed = line.trimmingCharacters(in: .whitespaces)
+      guard !trimmed.hasPrefix("#"), trimmed.hasPrefix("core-ref:") else { continue }
+      let ref = trimmed.dropFirst("core-ref:".count)
+        .trimmingCharacters(in: .whitespaces)
+        .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+      if ref != "main" { issues.append("core-ref is not main") }
     }
     return issues
   }
