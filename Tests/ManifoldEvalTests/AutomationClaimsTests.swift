@@ -205,11 +205,32 @@ final class AutomationClaimsTests: XCTestCase {
 
   func testCoreMainCanaryUsesReusableWorkflowOnSupportedRunner() throws {
     let yaml = try read(".github/workflows/canary.yml")
-    XCTAssertTrue(yaml.contains("name: Canary (core main)"))
-    XCTAssertTrue(yaml.contains("uses: ManifoldKit/.github/.github/workflows/companion-canary.yml@7aab2cfd25b44b2abf1b48107ec9f41d6b75c591"))
-    XCTAssertTrue(yaml.contains("runner: macos-26"))
-    XCTAssertTrue(yaml.contains("types: [core-release]"))
+    XCTAssertEqual(coreMainCanaryIssues(in: yaml), [])
     XCTAssertTrue(try statusDoc().contains("`canary.yml`"))
+  }
+
+  func testCoreMainCanaryRejectsInertWorkflowFixture() throws {
+    let yaml = try read("Tests/ManifoldEvalTests/Fixtures/Canary/inert.yml")
+    XCTAssertEqual(
+      coreMainCanaryIssues(in: yaml),
+      ["missing pinned reusable canary call", "wrong runner"])
+  }
+
+  private func coreMainCanaryIssues(in yaml: String) -> [String] {
+    var issues: [String] = []
+    if !yaml.contains("name: Canary (core main)") {
+      issues.append("wrong workflow name")
+    }
+    if !yaml.contains("uses: ManifoldKit/.github/.github/workflows/companion-canary.yml@7aab2cfd25b44b2abf1b48107ec9f41d6b75c591") {
+      issues.append("missing pinned reusable canary call")
+    }
+    if !yaml.contains("runner: macos-26") {
+      issues.append("wrong runner")
+    }
+    if !yaml.contains("types: [core-release]") {
+      issues.append("missing core-release trigger")
+    }
+    return issues
   }
 
   /// `pull_request` must never carry a path filter.
