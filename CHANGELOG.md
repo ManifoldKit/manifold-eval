@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.7](https://github.com/ManifoldKit/manifold-eval/compare/v0.1.6...v0.1.7) (2026-09-23)
+
+
+### Features
+
+* align platform floor with ManifoldKit 0.79 ([#81](https://github.com/ManifoldKit/manifold-eval/issues/81)) ([dee5f72](https://github.com/ManifoldKit/manifold-eval/commit/dee5f7291b73444dd40da5a8b6e744c097276576))
+
+
+### Bug Fixes
+
+* **perf:** require secure remote benchmark endpoints ([#77](https://github.com/ManifoldKit/manifold-eval/issues/77)) ([eea8e8c](https://github.com/ManifoldKit/manifold-eval/commit/eea8e8c214f0c263a2f39eefcd3744750ee72b54))
+
 ## [0.1.6](https://github.com/ManifoldKit/manifold-eval/compare/v0.1.5...v0.1.6) (2026-09-10)
 
 
