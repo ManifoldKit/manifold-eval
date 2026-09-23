@@ -1,0 +1,17 @@
+name: Canary (core main)
+
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+  repository_dispatch:
+    types: [core-release]
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    runs-on: macos-26
+    steps:
+      - run: echo "No build or test was run"

@@ -1,0 +1,11 @@
+diff --git a/Sources/ManifoldTools/ConformanceRecord.swift b/Sources/ManifoldTools/ConformanceRecord.swift
+--- a/Sources/ManifoldTools/ConformanceRecord.swift
++++ b/Sources/ManifoldTools/ConformanceRecord.swift
+@@ -90,6 +90,6 @@ public struct ConformanceRecord: Codable, Sendable, Equatable {
+     /// The ManifoldKit core commit the run was built from — runs are only
+     /// comparable across the same core binary (eval drivers share the core
+     /// binary; never rebuild mid-eval).
+-    public let coreCommit: String
++    let coreCommit: String
+
+     /// Tooling/runtime versions that shaped the run (e.g. `"ollama": "0.5.4"`,

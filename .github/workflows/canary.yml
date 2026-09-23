@@ -1,0 +1,21 @@
+name: Canary (core main)
+
+# Exercise this repo against unreleased ManifoldKit main. The reusable workflow
+# checks out core and uses `swift package edit`, leaving Package.swift's exact
+# release pin intact. A green run proves the eval build and fixtures still work
+# with that core commit; it does not run live models.
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+  repository_dispatch:
+    types: [core-release]
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    uses: ManifoldKit/.github/.github/workflows/companion-canary.yml@7aab2cfd25b44b2abf1b48107ec9f41d6b75c591
+    with:
+      runner: macos-26

@@ -85,7 +85,7 @@ final class AutomationClaimsTests: XCTestCase {
 
   /// Every workflow whose status this repo documents.
   private static let workflowFiles = [
-    "ci.yml", "rot-guard.yml", "core-bump.yml", "release-please.yml",
+    "ci.yml", "rot-guard.yml", "core-bump.yml", "release-please.yml", "canary.yml",
   ]
 
   /// Top-level trigger keys present in a workflow's `on:` block.
@@ -201,6 +201,49 @@ final class AutomationClaimsTests: XCTestCase {
         """
       )
     }
+  }
+
+  func testCoreMainCanaryUsesReusableWorkflowOnSupportedRunner() throws {
+    let yaml = try read(".github/workflows/canary.yml")
+    XCTAssertEqual(coreMainCanaryIssues(in: yaml), [])
+    XCTAssertTrue(try statusDoc().contains("`canary.yml`"))
+  }
+
+  func testCoreMainCanaryRejectsInertWorkflowFixture() throws {
+    let yaml = try read("Tests/ManifoldEvalTests/Fixtures/Canary/inert.yml")
+    XCTAssertEqual(
+      coreMainCanaryIssues(in: yaml),
+      ["missing pinned reusable canary call", "wrong runner"])
+  }
+
+  func testCoreMainCanaryRejectsReleasedCoreRefFixture() throws {
+    let yaml = try read("Tests/ManifoldEvalTests/Fixtures/Canary/released-ref.yml")
+    XCTAssertEqual(coreMainCanaryIssues(in: yaml), ["core-ref is not main"])
+  }
+
+  private func coreMainCanaryIssues(in yaml: String) -> [String] {
+    var issues: [String] = []
+    if !yaml.contains("name: Canary (core main)") {
+      issues.append("wrong workflow name")
+    }
+    if !yaml.contains("uses: ManifoldKit/.github/.github/workflows/companion-canary.yml@7aab2cfd25b44b2abf1b48107ec9f41d6b75c591") {
+      issues.append("missing pinned reusable canary call")
+    }
+    if !yaml.contains("runner: macos-26") {
+      issues.append("wrong runner")
+    }
+    if !yaml.contains("types: [core-release]") {
+      issues.append("missing core-release trigger")
+    }
+    for line in yaml.split(separator: "\n") {
+      let trimmed = line.trimmingCharacters(in: .whitespaces)
+      guard !trimmed.hasPrefix("#"), trimmed.hasPrefix("core-ref:") else { continue }
+      let ref = trimmed.dropFirst("core-ref:".count)
+        .trimmingCharacters(in: .whitespaces)
+        .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+      if ref != "main" { issues.append("core-ref is not main") }
+    }
+    return issues
   }
 
   /// `pull_request` must never carry a path filter.
