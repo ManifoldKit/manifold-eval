@@ -527,10 +527,23 @@ Then enable the gated tests (each prints its own invocation after fetch):
 BFCL_GORILLA_CACHE=~/.cache/manifold-eval/bfcl swift test --filter BFCLRealCorpusTests
 RUN_OLLAMA_EMBED=1 STSB_DATA=~/.cache/manifold-eval/stsb_test.json swift test --filter MTEBRealCorpusTests
 RUN_OLLAMA_LIVE=1 swift test --filter RegressionCrossQuantLiveTests   # needs two quant tags pulled
+RUN_OLLAMA_LIVE=1 \
+  REGRESSION_GATE_BASELINE_MODEL=llama3.1:8b \
+  REGRESSION_GATE_REDRIVEN_MODEL=gemma3:4b \
+  REGRESSION_GATE_STABLE_MODEL=gemma3:4b \
+  swift test --filter RegressionGateLiveTests
 RUN_OLLAMA_LIVE=1 OLLAMA_MODEL=qwen2.5-0.5b swift test --filter IFEvalGenerateLiveTests
 RUN_OLLAMA_LIVE=1 OLLAMA_MODEL=mistral-7b-tools:latest swift test --filter ToolLoopGenerateLiveTests
 RUN_PERF_LIVE=1 swift test --filter PerfHTTPDriverLiveTests   # needs a local Ollama + OpenAI-compatible server
 ```
+
+`RegressionGateLiveTests` keeps its 2026-06-30 model aliases as defaults for existing operators,
+but current installations should pass the exact full names reported by `GET /api/tags`, as shown
+above. These three `REGRESSION_GATE_*` variables are deliberately separate from the same-model
+cross-quant lane's `REGRESS_*` variables. Before inference, the proxy lane requires exact tag
+matches and prints each selected model's name, digest, and reported quantization. A missing tag is
+reported as an unmeasured skip with pull/override guidance; HTTP and JSON failures remain test
+failures rather than being converted into model scores.
 
 A green hermetic run means *the harness is intact* — never *the models still score the same*. Those
 are [two different tiers](docs/CONCEPTS.md#tier-1-vs-hardware-gated), and conflating them is how an
