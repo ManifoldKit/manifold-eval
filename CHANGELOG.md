@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.1.7](https://github.com/ManifoldKit/manifold-eval/compare/v0.1.6...v0.1.7) (2026-10-17)
+
+manifold-eval 0.1.7 aligns the assurance harness with ManifoldKit 0.79.1,
+protects remote benchmark traffic, and makes live smoke-test failures visible.
+This release requires **macOS 26 or later**.
+
+### Highlights
+
+#### Run against ManifoldKit 0.79.1 on macOS 26
+
+The harness now pins ManifoldKit exactly to 0.79.1, replacing the 0.78.0 pin
+in 0.1.6. Its deployment floor moves from macOS 15 to macOS 26 to match core;
+users who need macOS 15 should stay on manifold-eval 0.1.6 and core 0.78.0
+([#81](https://github.com/ManifoldKit/manifold-eval/pull/81),
+[#85](https://github.com/ManifoldKit/manifold-eval/pull/85)).
+
+#### Protect remote benchmark traffic
+
+Benchmark endpoints outside the local machine must use HTTPS. Plain HTTP is
+accepted only for recognized loopback identities: `localhost`, IPv4
+`127.0.0.0/8`, and IPv6 `::1`. Redirects cannot downgrade HTTPS to HTTP, and
+cross-origin redirects strip authorization, cookie, proxy-authorization, and
+`X-API-*` headers
+([#77](https://github.com/ManifoldKit/manifold-eval/pull/77)).
+
+#### Surface failed live tool-loop episodes
+
+The live tool-loop smoke test now fails when generation produces errored
+episodes, even if the expected number of transcript entries exists. Errors
+include episode diagnostics and remain unmeasured infrastructure failures;
+a clean run with no structured tool calls still counts as a measured
+capability zero
+([#83](https://github.com/ManifoldKit/manifold-eval/pull/83)).
+
+### Validation scope
+
+The default build and test gate exercises deterministic fixtures. It does
+not run live models or establish new model-quality or performance results.
+
 ## [0.1.6](https://github.com/ManifoldKit/manifold-eval/compare/v0.1.5...v0.1.6) (2026-09-10)
 
 
