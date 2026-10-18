@@ -1,23 +1,55 @@
 name: Release Please
 
-# Thin shim over the org reusable workflow — see
-# https://github.com/ManifoldKit/.github/blob/main/WORKFLOWS.md
-# for what companion-release-please.yml actually does (wraps
-# googleapis/release-please-action). Mirrors manifold-mlx's shim.
-
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-# Read-only default; the job below opts up to contents:write +
-# pull-requests:write, which release-please actually needs.
 permissions:
   contents: read
 
 jobs:
   release-please:
-    uses: ManifoldKit/.github/.github/workflows/companion-release-please.yml@ad62782801a0b817a5e269a812577826ea7f240e
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      # Publication must finish and emit outputs before a newer push can run.
+      group: release-please
+      cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write
+    outputs:
+      release_created: ${{ steps.release-please.outputs.release_created }}
+      tag_name: ${{ steps.release-please.outputs.tag_name }}
+      sha: ${{ steps.release-please.outputs.sha }}
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
+        id: release-please
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  sync-release-notes:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # New pushes may supersede detection, but must not interrupt a notes update.
+    concurrency:
+      group: release-notes-${{ needs.release-please.outputs.tag_name }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.sha }}
+          persist-credentials: false
+      - name: Synchronize and verify tagged changelog notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+          RELEASE_SHA: ${{ needs.release-please.outputs.sha }}
+        run: bash scripts/sync-release-notes.sh --repo "$GH_REPO" --tag "$TAG_NAME" --sha "$RELEASE_SHA"

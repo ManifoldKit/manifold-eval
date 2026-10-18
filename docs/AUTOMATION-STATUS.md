@@ -21,7 +21,7 @@ table and `swift test` goes red.
 | Rot-guard | `rot-guard.yml` | `schedule` `0 8 * * 1`, `workflow_dispatch` | weekly, Mondays 08:00 UTC |
 | Core-main canary | `canary.yml` | `schedule` `23 5 * * *`, `workflow_dispatch`, `repository_dispatch` | nightly at 05:23 UTC, on demand, and on core release |
 | Core pin bump | `core-bump.yml` | `repository_dispatch`, `workflow_dispatch` | every ManifoldKit release |
-| Release | `release-please.yml` | `push` (main), `workflow_dispatch` | every merge to main |
+| Release | `release-please.yml` | `push` (main), `workflow_dispatch` | every merge to main; newly created releases synchronize notes from their tagged changelog |
 | CodeQL | `codeql.yml` | `push` (main), `pull_request` (main), `schedule` `0 6 * * 1` | every push/PR to main, plus a weekly baseline scan Mondays 06:00 UTC. Scans the `actions` language only — no Python in this repo today (contrast manifold-mlx, which also scans `python`). Swift is not analyzed: CodeQL's Swift tracer wraps every `swiftc` invocation, and on ManifoldKit/ManifoldKit that pushed build times past a 30-minute timeout — see that repo's `codeql.yml` for the full story. |
 | Dependency review | `dependency-review.yml` | `pull_request` | every PR that touches a dependency manifest |
 
@@ -31,7 +31,7 @@ table and `swift test` goes red.
 two rows are hand-maintained for now, exactly the kind of drift this doc exists to prevent. Filed as
 a follow-up to extend the guard rather than fixed here.
 
-Three further guarded facts:
+Further guarded facts:
 
 - **`ci.yml` has no path filter on `pull_request`** — it path-ignores `CHANGELOG.md` /
   `.release-please-manifest.json` on **`push` only**. The asymmetry is deliberate:
@@ -51,6 +51,38 @@ Three further guarded facts:
   shows source compatibility and fixture behavior at that core commit. It does not run live models
   or prove model scores. The `core-release` trigger is shared with `core-bump.yml`; each job has a
   separate purpose, and a canary failure must stay visible even when a pin bump also runs.
+
+### Release notes come from the tagged changelog
+
+`release-please.yml` runs the pinned Release Please action locally so it can
+expose `release_created`, `tag_name`, and `sha`. Only a newly created release
+starts `sync-release-notes`; ordinary release-PR updates skip that job. The sync
+job checks out the released SHA and runs `scripts/sync-release-notes.sh` with
+that tag and commit. Once started, neither detection nor sync is cancelled by
+a newer push: detection must finish publishing and emit its outputs before the
+next detection run starts. Sync jobs are serialized per tag.
+
+The helper verifies that the published tag resolves to the release commit,
+reads `CHANGELOG.md` from that immutable Git object, and requires exactly one
+non-empty section for the exact version. It replaces the GitHub release body
+with that section, including its version heading, then reads it back and
+requires equality. An already matching body needs no update. Missing or empty
+entries, tag mismatches, API errors, and unsuccessful readback fail the job;
+a green release workflow therefore includes successful notes synchronization.
+The helper and its workflow wiring are covered by `ReleaseNotesSyncTests` in
+the required full fixture test gate, including deliberately broken fixtures.
+
+To check an existing release without changing it, use its full tagged SHA:
+
+```sh
+bash scripts/sync-release-notes.sh --repo ManifoldKit/manifold-eval \
+  --tag v0.1.7 --sha 3200fa27d747ec71097a26ec2d5a308ff2f6b783 --check
+```
+
+A failed sync job means publication still needs attention even if the tag and
+GitHub release already exist. Inspect the error and confirm the final public
+notes before declaring the release complete. This workflow does not edit the
+Release Please PR title or body.
 
 ## Not derivable from files
 
@@ -106,8 +138,9 @@ gh pr merge <n> --squash
 ```
 
 Removing step 2 entirely would need release-please to post under an App/PAT identity rather than the
-default `GITHUB_TOKEN` — that lives in `ManifoldKit/.github`'s `companion-release-please.yml`, is
-shared with manifold-mlx and manifold-llama, and touches agent identity, so it is not a per-repo fix.
+default `GITHUB_TOKEN`. Eval now calls the same pinned Release Please action in its own
+`release-please.yml` so it can expose release outputs for notes synchronization; that does not
+change the bot identity or remove the approval gate. Changing that identity is a separate change.
 
 **manifold-mlx and manifold-llama deliberately still carry the path filter** — their `ci.yml` records
 why (release Highlights are hand-edited, so a manual merge is already the flow). That divergence is
