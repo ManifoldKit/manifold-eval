@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.8](https://github.com/ManifoldKit/manifold-eval/compare/v0.1.7...v0.1.8) (2026-10-18)
+
+
+### Bug Fixes
+
+* **ci:** sync release notes from tagged changelog ([#86](https://github.com/ManifoldKit/manifold-eval/issues/86)) ([450def0](https://github.com/ManifoldKit/manifold-eval/commit/450def0fe72adce4ec7d44d85262bc1fd4958b96))
+
 ## [0.1.7](https://github.com/ManifoldKit/manifold-eval/compare/v0.1.6...v0.1.7) (2026-10-17)
 
 manifold-eval 0.1.7 aligns the assurance harness with ManifoldKit 0.79.1,
