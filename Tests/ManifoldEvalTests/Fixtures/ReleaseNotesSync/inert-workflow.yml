@@ -1,0 +1,23 @@
+name: Release Please
+
+# Thin shim over the org reusable workflow — see
+# https://github.com/ManifoldKit/.github/blob/main/WORKFLOWS.md
+# for what companion-release-please.yml actually does (wraps
+# googleapis/release-please-action). Mirrors manifold-mlx's shim.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Read-only default; the job below opts up to contents:write +
+# pull-requests:write, which release-please actually needs.
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    uses: ManifoldKit/.github/.github/workflows/companion-release-please.yml@ad62782801a0b817a5e269a812577826ea7f240e
+    permissions:
+      contents: write
+      pull-requests: write

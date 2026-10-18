@@ -1,0 +1,52 @@
+#!/bin/bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$FIXTURE_DIR/calls"
+case "$1 $2" in
+  'api '*)
+    [[ "${FAIL_API:-0}" != 1 ]] || exit 31
+    if [[ "$2" == */git/ref/tags/* ]]; then
+      if [[ -n "${ANNOTATED:-}" ]]; then
+        printf 'tag %s\n' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      else
+        printf '%s %s\n' "${TAG_TYPE:-commit}" "${TAG_SHA:-$FIXTURE_SHA}"
+      fi
+    elif [[ "$2" == */git/tags/* ]]; then
+      if [[ "${ANNOTATED:-}" == cycle ]]; then
+        printf 'tag %s\n' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      else
+        printf 'commit %s\n' "$FIXTURE_SHA"
+      fi
+    else
+      exit 32
+    fi
+    ;;
+  'release view')
+    if [[ "$*" == *'--json tagName,isDraft'* ]]; then
+      [[ "${FAIL_METADATA:-0}" != 1 ]] || exit 33
+      printf '%s\n' "${RELEASE_METADATA:-v1.2.3 false}"
+    elif [[ "$*" == *'--json body'* ]]; then
+      [[ "${FAIL_BODY:-0}" != 1 ]] || exit 34
+      if [[ -s "$FIXTURE_DIR/writes" && "${UPDATE_MODE:-}" == readback-fail ]]; then exit 35; fi
+      cat "$FIXTURE_DIR/body"
+    else
+      exit 36
+    fi
+    ;;
+  'release edit')
+    printf 'edit\n' >> "$FIXTURE_DIR/writes"
+    notes=''
+    while [[ $# -gt 0 ]]; do
+      if [[ "$1" == --notes-file ]]; then notes="$2"; break; fi
+      shift
+    done
+    [[ -n "$notes" && -f "$notes" ]] || exit 37
+    case "${UPDATE_MODE:-normal}" in
+      fail) exit 38 ;;
+      noop) : ;;
+      partial) head -n 1 "$notes" > "$FIXTURE_DIR/body" ;;
+      normal|readback-fail) cp "$notes" "$FIXTURE_DIR/body" ;;
+      *) exit 39 ;;
+    esac
+    ;;
+  *) exit 40 ;;
+esac
