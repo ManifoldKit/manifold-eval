@@ -1,0 +1,18 @@
+{
+  "models": [
+    {
+      "name": "llama3.1:8b",
+      "digest": "sha256:llama31",
+      "details": {
+        "quantization_level": "Q4_K_M"
+      }
+    },
+    {
+      "name": "gemma3:4b",
+      "digest": "sha256:gemma3",
+      "details": {
+        "quantization_level": "Q4_K_M"
+      }
+    }
+  ]
+}
