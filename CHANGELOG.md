@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.8](https://github.com/ManifoldKit/manifold-eval/compare/v0.1.7...v0.1.8) (2026-11-14)
+
+### Highlights
+
+#### Keep published notes tied to the released source
+
+New releases copy their notes from the CHANGELOG section at the published tag and verify the result. Tag mismatches, missing notes and failed updates fail the publication job instead of leaving an apparently complete release with incorrect notes.
+
+### Fixes
+
+- Synchronize and verify release notes from the immutable tagged changelog ([#86](https://github.com/ManifoldKit/manifold-eval/pull/86)).
+
+### Dependencies
+
+- Pin ManifoldKit exactly to 0.80.0 for this baseline. The core pin update does not change the eval harness's own scoring behavior.
+
 ## [0.1.7](https://github.com/ManifoldKit/manifold-eval/compare/v0.1.6...v0.1.7) (2026-10-17)
 
 manifold-eval 0.1.7 aligns the assurance harness with ManifoldKit 0.79.1,
