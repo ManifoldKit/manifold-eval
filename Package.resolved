@@ -1,5 +1,5 @@
 {
-  "originHash" : "7a68a52c35328fc34eb8ea52843e307adb227cc6789f7894a566865f2fb1e399",
+  "originHash" : "f678f5e457efba5f77360b0560f0c334ed29e6a84e100d883576ce939243c3e3",
   "pins" : [
     {
       "identity" : "eventsource",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ManifoldKit/ManifoldKit.git",
       "state" : {
-        "revision" : "31439b8c8e8705d018dfda7db24f370818ea755f",
-        "version" : "0.80.0"
+        "revision" : "2a07d0bb671e058a279bada2e520fb235cc8f41b",
+        "version" : "0.80.1"
       }
     },
     {
