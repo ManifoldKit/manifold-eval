@@ -6,27 +6,33 @@ import XCTest
 /// movement using actual Ollama model outputs, fed directly to the gate via
 /// ``OllamaRawDriver`` (the same producer path ``RegressionRunner`` uses).
 ///
-/// This proves the gate logic on a *different-models* pair (a strong, guaranteed
-/// score difference). The genuine same-model **cross-quant** verification lives in
+/// This exercises the gate logic on a *different-models* pair whose score
+/// difference was observed in the historical verification run. It is a live
+/// assertion, not a universal claim about either model. The genuine same-model
+/// **cross-quant** verification lives in
 /// `RegressionCrossQuantLiveTests`.
 ///
 /// **Env-gated** (`RUN_OLLAMA_LIVE=1`): CI has no Ollama, so these skip there.
 /// Run locally with:
 ///
-///     RUN_OLLAMA_LIVE=1 swift test --filter RegressionGateLiveTests
+///     RUN_OLLAMA_LIVE=1 \
+///       REGRESSION_GATE_BASELINE_MODEL=llama3.1:8b \
+///       REGRESSION_GATE_REDRIVEN_MODEL=gemma3:4b \
+///       REGRESSION_GATE_STABLE_MODEL=gemma3:4b \
+///       swift test --filter RegressionGateLiveTests
 ///
 /// ## What this proves
 ///
 /// 1. **Gate detects movement** (`testMovedPairDetectsRealModelDifference`):
-///    `llama3.1-8b:latest` (baseline) reliably produces output containing "4"
-///    for "2 + 2 =" in raw mode (score=1.0); `gemma3-4b:latest` (re-driven)
-///    reliably does not — it enters question-listing mode and produces
+///    In the 2026-06-30 observation, `llama3.1-8b:latest` (baseline) produced
+///    output containing "4" for "2 + 2 =" in raw mode (score=1.0), while
+///    `gemma3-4b:latest` (re-driven) entered question-listing mode and produced
 ///    "?\n\nWhat is the capital of France?..." (score=0.0). The gate returns
-///    `.moved(delta: -1.0)`, proving it detects a real quality regression.
+///    `.moved(delta: -1.0)` when that measured score difference still holds.
 ///
 /// 2. **No false positive** (`testStablePairProducesNoFalsePositive`):
-///    `gemma3-4b:latest` is byte-identical at temp=0. Running it twice against
-///    the same prompt produces the same score both times → `.stable`.
+///    The same configured model runs both legs at temp=0. The assertion requires
+///    both measured outputs to receive the same score → `.stable`.
 ///
 /// ## What this does NOT prove
 ///
@@ -42,39 +48,43 @@ final class RegressionGateLiveTests: XCTestCase {
     ProcessInfo.processInfo.environment["RUN_OLLAMA_LIVE"] == "1"
   }
 
+  private var configuration: RegressionGateLiveConfiguration {
+    get throws {
+      try RegressionGateLiveConfiguration(environment: ProcessInfo.processInfo.environment)
+    }
+  }
+
   private func ollamaURL() throws -> URL {
     let raw = ProcessInfo.processInfo.environment["OLLAMA_URL"] ?? "http://localhost:11434"
     guard let url = URL(string: raw) else {
-      throw XCTSkip("invalid OLLAMA_URL: \(raw)")
+      throw RegressionGateLiveConfigurationError.invalidOllamaURL(raw)
     }
     return url
   }
 
-  // MARK: - Models under test
+  private func preflightModels(
+    _ roles: [(role: String, model: String)],
+    at url: URL
+  ) async throws {
+    let evidence: [OllamaModelEvidence]
+    do {
+      evidence = try await OllamaModelPreflight.fetch(
+        requiredModels: roles.map { $0.model }, baseURL: url)
+    } catch let error as OllamaModelPreflightError {
+      if case .missingModels = error {
+        throw XCTSkip(error.localizedDescription)
+      }
+      throw error
+    }
 
-  /// Baseline model for the moved-pair test.
-  ///
-  /// `llama3.1-8b:latest` reliably produces output containing "4" for the
-  /// prompt "2 + 2 =" in raw mode (confirmed across multiple runs 2026-06-30).
-  /// Both variants observed ("4. This is a basic..." and "? (Answer: 4)...")
-  /// contain the digit, so `ContainsRegressionScorer(expected: "4")` gives 1.0
-  /// regardless of which variant appears.
-  private let baselineModel = "llama3.1-8b:latest"
-
-  /// Re-driven model for the moved-pair test.
-  ///
-  /// `gemma3-4b:latest` consistently produces " ?\n\nWhat is the capital of
-  /// France?\n\nWhich planet is known as..." in raw mode for "2 + 2 =" — it
-  /// never mentions "4", so the scorer gives 0.0. The delta is -1.0, far
-  /// exceeding the 0.05 threshold.
-  private let reDrivenModel = "gemma3-4b:latest"
-
-  /// Model used for both legs of the stable-pair test.
-  ///
-  /// `gemma3-4b:latest` is byte-identical at temp=0 — confirmed across three
-  /// consecutive runs 2026-06-30. Using it for both legs guarantees identical
-  /// scores and a `.stable` verdict with no false positive.
-  private let stableModel = "gemma3-4b:latest"
+    let byName = Dictionary(uniqueKeysWithValues: evidence.map { ($0.name, $0) })
+    for item in roles {
+      guard let model = byName[item.model] else { continue }
+      print(
+        "[regression-gate model] role=\(item.role) name=\(model.name) "
+          + "digest=\(model.digest) quant=\(model.quantizationLevel ?? "<unreported>")")
+    }
+  }
 
   // MARK: - Probe prompt
 
@@ -98,13 +108,20 @@ final class RegressionGateLiveTests: XCTestCase {
   func testMovedPairDetectsRealModelDifference() async throws {
     try XCTSkipUnless(isEnabled, "set RUN_OLLAMA_LIVE=1 to run live regression gate tests")
 
+    let liveConfiguration = try configuration
     let url = try ollamaURL()
+    try await preflightModels(
+      [
+        ("baseline", liveConfiguration.baselineModel),
+        ("re-driven", liveConfiguration.reDrivenModel),
+      ],
+      at: url)
     let driver = OllamaRawDriver(baseURL: url, coreCommit: "live-p4-verify")
     let scorer = ContainsRegressionScorer(expected: "4")
 
     // --- Baseline run (llama3.1-8b) ---
     let baseline = try await driver.run(
-      model: baselineModel,
+      model: liveConfiguration.baselineModel,
       prompt: probe,
       sampler: .greedy,
       repeatIndex: 0
@@ -118,7 +135,7 @@ final class RegressionGateLiveTests: XCTestCase {
 
     // --- Re-driven run (gemma3-4b — proxy for a model change) ---
     let reDriven = try await driver.run(
-      model: reDrivenModel,
+      model: liveConfiguration.reDrivenModel,
       prompt: probe,
       sampler: .greedy,
       repeatIndex: 0
@@ -142,11 +159,11 @@ final class RegressionGateLiveTests: XCTestCase {
 
     switch verdict {
     case .moved(let delta):
-      // sabotage: change reDrivenModel to baselineModel → reDriven also
+      // sabotage: change the re-driven model to the baseline model → it also
       // contains "4" → delta=0 → .stable
       XCTAssertLessThan(
         delta, 0,
-        "gemma3-4b degraded relative to llama3.1 — expected negative delta; got \(delta). "
+        "configured moved pair must retain the observed negative delta; got \(delta). "
           + "baselineOutput='\(baseline.output.prefix(60))' "
           + "reDrivenOutput='\(reDriven.output.prefix(60))'"
       )
@@ -171,19 +188,26 @@ final class RegressionGateLiveTests: XCTestCase {
   /// for both the baseline and the re-driven run.
   ///
   /// **Expected verdict:** `.stable`
-  /// - Both legs: gemma3-4b (byte-identical at temp=0)
-  /// - Both score 0.0 (neither contains "4")
-  /// - delta = 0.0, which is ≤ 0.05 threshold → stable
+  /// - Both legs use the exact `REGRESSION_GATE_STABLE_MODEL` tag.
+  /// - The live assertion requires both measured outputs to receive the same score.
+  /// - Equal scores produce delta 0.0, which is ≤ the 0.05 threshold.
   func testStablePairProducesNoFalsePositive() async throws {
     try XCTSkipUnless(isEnabled, "set RUN_OLLAMA_LIVE=1 to run live regression gate tests")
 
+    let liveConfiguration = try configuration
     let url = try ollamaURL()
+    try await preflightModels(
+      [
+        ("stable-baseline", liveConfiguration.stableModel),
+        ("stable-re-driven", liveConfiguration.stableModel),
+      ],
+      at: url)
     let driver = OllamaRawDriver(baseURL: url, coreCommit: "live-p4-verify")
     let scorer = ContainsRegressionScorer(expected: "4")
 
     // --- Baseline run ---
     let baseline = try await driver.run(
-      model: stableModel,
+      model: liveConfiguration.stableModel,
       prompt: probe,
       sampler: .greedy,
       repeatIndex: 0
@@ -195,7 +219,7 @@ final class RegressionGateLiveTests: XCTestCase {
 
     // --- Re-driven run (same model, same prompt, repeatIndex 1) ---
     let reDriven = try await driver.run(
-      model: stableModel,
+      model: liveConfiguration.stableModel,
       prompt: probe,
       sampler: .greedy,
       repeatIndex: 1
@@ -209,7 +233,7 @@ final class RegressionGateLiveTests: XCTestCase {
       scorer: scorer
     )
 
-    // sabotage: replace stableModel in the re-driven run with a model that
+    // sabotage: replace the stable model in the re-driven run with a model that
     // mentions "4" → reDrivenScore=1.0, delta=1.0 > threshold → .moved
     XCTAssertEqual(
       verdict, .stable,
@@ -224,15 +248,12 @@ final class RegressionGateLiveTests: XCTestCase {
 
 /// Scores a model output `1.0` if it contains `expected`, else `0.0`.
 ///
-/// Designed for the "2 + 2 =" probe:
-/// - `llama3.1-8b:latest` in raw mode reliably includes "4" → 1.0.
-/// - `gemma3-4b:latest` in raw mode enters question-listing and never includes
-///   "4" → 0.0.
+/// Designed for the historical "2 + 2 =" observation: the configured baseline
+/// included "4" while the configured re-driven model did not. A live run must
+/// measure that difference again; the scorer does not assume it universally.
 ///
 /// The binary scoring produces an unambiguous delta of 1.0 between the two
-/// models, making threshold-boundary false verdicts impossible. The scorer is
-/// invariant to minor llama3.1 output variation (all observed variants contain
-/// "4") — confirming it is an honest probe for this comparison.
+/// models when the observation holds, keeping the delta far from the threshold.
 ///
 /// **Test-only.** Not for production use — a production scorer would live in
 /// `Sources/ManifoldEval` with proper documentation and benchmarking.
