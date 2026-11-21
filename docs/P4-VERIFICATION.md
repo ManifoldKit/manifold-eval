@@ -69,9 +69,9 @@ impossible (delta is always 0.0 or ±1.0, far outside the 0.05 threshold).
 - `threshold` = 0.05
 - **Verdict: `.stable`** ✓
 
-`gemma3-4b:latest` is byte-identical at `temperature=0` — confirmed across three
-consecutive runs before writing this test. The stable pair exploits this property:
-using the same deterministic model for both legs guarantees identical scores.
+`gemma3-4b:latest` was byte-identical at `temperature=0` across the three
+consecutive runs recorded on 2026-06-30. The stable-pair test re-measures that
+control; it does not assume every future model revision will retain the observation.
 
 **Test result (2026-06-30):** `testStablePairProducesNoFalsePositive` **PASSED** (6.03 s)
 
@@ -170,9 +170,16 @@ Reproduce: `ollama pull qwen2.5:0.5b-instruct-q8_0 qwen2.5:0.5b-instruct-q4_K_M`
 ## How to reproduce (original proxy run)
 
 ```bash
-# Requires Ollama at localhost:11434 with llama3.1-8b:latest and gemma3-4b:latest pulled.
+# The names below are the exact installed tags for this rerun. The historical
+# aliases in the tables above remain part of the original evidence record.
 cd /path/to/manifold-eval  # or the p4-verify worktree
-RUN_OLLAMA_LIVE=1 swift test --filter RegressionGateLiveTests
+RUN_OLLAMA_LIVE=1 \
+  REGRESSION_GATE_BASELINE_MODEL=llama3.1:8b \
+  REGRESSION_GATE_REDRIVEN_MODEL=gemma3:4b \
+  REGRESSION_GATE_STABLE_MODEL=gemma3:4b \
+  swift test --filter RegressionGateLiveTests
 ```
 
-Expected output: both tests PASS in ~16 seconds total.
+The preflight prints the exact model name, digest, and quantization before inference. The moved
+pair still has to earn its historical negative delta on the current weights; the documentation
+does not guarantee that observation for every tag or future model revision.
